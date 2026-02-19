@@ -12,7 +12,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
  *      or the sender can retake tokens after the unlock time has elapsed.
  */
 contract HTLC {
-    // Custom errors for gas efficiency
+    
     error ZeroAddress();
     error ZeroAmount();
     error InvalidPreImage();
@@ -132,22 +132,20 @@ contract HTLC {
         uint256 amount = l.amount;
         if (amount == 0) revert InvalidPreImage();
 
-        // Note: block.timestamp can be manipulated by miners within ~15 seconds
-        // This is acceptable for HTLC use cases where time windows are typically hours/days
         if (block.timestamp >= l.unlockTime) revert ClaimTimeExpired();
         address receiverAddress = l.receiverAddress;
         if (receiverAddress == address(0)) revert ZeroAddress();
         if (msg.sender != receiverAddress) revert UnauthorizedClaim();
 
-        // Save values before delete (Checks-Effects-Interactions pattern)
         address tokenAddr = l.tokenAddress;
         if (tokenAddr == address(0)) revert ZeroAddress();
         address senderAddr = l.senderAddress;
         
-        // Effects: Delete lock before external call to prevent reentrancy
         delete locks[lockKey];
         
-        // Emit event before external call (if transfer fails, transaction reverts and event won't be recorded)
+        IERC20 erc20 = IERC20(tokenAddr);
+        if (!erc20.transfer(receiverAddress, amount)) revert TransferFailed();
+
         emit Claimed({
             preImage: preImage,
             hashValue: hashValue,
@@ -157,10 +155,6 @@ contract HTLC {
             senderAddress: senderAddr,
             receiverAddress: receiverAddress
         });
-        
-        // Interactions: Transfer tokens after state changes
-        IERC20 erc20 = IERC20(tokenAddr);
-        if (!erc20.transfer(receiverAddress, amount)) revert TransferFailed();
     }
 
     /**
@@ -190,7 +184,6 @@ contract HTLC {
         bytes32 lockKey = getLockKey(hashValue, msg.sender);
         if (locks[lockKey].amount != 0) revert LockAlreadyExists();
 
-        // Effects: Set state before external call
         locks[lockKey] = Lock({
             unlockTime: unlockTime,
             amount: amount,
@@ -199,19 +192,17 @@ contract HTLC {
             receiverAddress: receiverAddress
         });
 
-        // Emit event before external call (if transferFrom fails, transaction reverts and event won't be recorded)
+        IERC20 erc20 = IERC20(tokenAddress);
+        if (!erc20.transferFrom(msg.sender, address(this), amount)) revert TransferFailed();
+
         emit Locked({
             hashValue: hashValue,
-            when: unlockTime,  // Emit actual unlock time, not current timestamp
+            when: unlockTime,
             amount: amount,
             tokenAddress: tokenAddress,
             senderAddress: msg.sender,
             receiverAddress: receiverAddress
         });
-
-        // Interactions: Transfer tokens after state changes
-        IERC20 erc20 = IERC20(tokenAddress);
-        if (!erc20.transferFrom(msg.sender, address(this), amount)) revert TransferFailed();
     }
 
     /**
@@ -227,21 +218,19 @@ contract HTLC {
         uint256 amount = l.amount;
         if (amount == 0) revert LockNotFound();
 
-        // Note: block.timestamp can be manipulated by miners within ~15 seconds
-        // This is acceptable for HTLC use cases where time windows are typically hours/days
         if (block.timestamp < l.unlockTime) revert RetakeTimeNotReached();
         address senderAddress = l.senderAddress;
         if (msg.sender != senderAddress) revert UnauthorizedRetake();
 
-        // Save values before delete (Checks-Effects-Interactions pattern)
         address tokenAddr = l.tokenAddress;
         if (tokenAddr == address(0)) revert ZeroAddress();
         address receiverAddr = l.receiverAddress;
 
-        // Effects: Delete lock before external call to prevent reentrancy
         delete locks[lockKey];
         
-        // Emit event before external call (if transfer fails, transaction reverts and event won't be recorded)
+        IERC20 erc20 = IERC20(tokenAddr);
+        if (!erc20.transfer(senderAddress, amount)) revert TransferFailed();
+
         emit Retaken({
             hashValue: hashValue,
             amount: amount,
@@ -250,10 +239,6 @@ contract HTLC {
             senderAddress: senderAddress,
             receiverAddress: receiverAddr
         });
-        
-        // Interactions: Transfer tokens after state changes
-        IERC20 erc20 = IERC20(tokenAddr);
-        if (!erc20.transfer(senderAddress, amount)) revert TransferFailed();
     }
 
     /**
