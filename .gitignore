@@ -1,0 +1,31 @@
+# Dependencies
+node_modules
+slither-env
+
+# Environment
+.env
+.env.local
+
+# Hardhat files
+cache
+artifacts
+typechain-types
+
+# Coverage
+coverage
+coverage.json
+
+# Reports (keep directory structure)
+reports/*.txt
+!reports/.gitkeep
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
