@@ -21,7 +21,8 @@ The HTLC contract implements a Hashed Timelock Contract pattern for atomic swaps
 
 ### Key Design Decisions
 
-1. **Lock Key Structure**: Uses `keccak256(hashValue, senderAddress)` to allow multiple locks with the same hashValue
+1. **Hash Function**: Uses SHA256 for computing hashValue from pre-image (to match DAML contracts)
+2. **Lock Key Structure**: Uses `keccak256(hashValue, senderAddress)` to allow multiple locks with the same hashValue
 2. **State Management**: Uses mapping to store locks, deleted after claim/retake
 3. **Access Control**: Enforced through require statements and address checks
 4. **Reentrancy Protection**: Follows Checks-Effects-Interactions pattern

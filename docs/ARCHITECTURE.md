@@ -62,7 +62,7 @@ Receiver calls claim(preImage, senderAddress)
   ↓
 Validate senderAddress != zero
   ↓
-Compute hashValue = keccak256(preImage)
+Compute hashValue = sha256(preImage)
   ↓
 Compute lockKey = keccak256(hashValue, senderAddress)
   ↓

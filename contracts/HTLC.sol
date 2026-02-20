@@ -43,13 +43,13 @@ contract HTLC {
 
     /**
      * @notice Mapping from lock key (keccak256(hashValue, senderAddress)) to Lock struct
-     * @dev Using hashValue + senderAddress as key allows multiple locks with the same hashValue
+     * @dev Using hashValue (SHA256) + senderAddress as key allows multiple locks with the same hashValue
      */
     mapping(bytes32 => Lock) public locks;
 
     /**
      * @notice Computes the unique lock key from hashValue and senderAddress
-     * @param hashValue The keccak256 hash of the pre-image
+     * @param hashValue The SHA256 hash of the pre-image
      * @param senderAddress The address of the sender who created the lock
      * @return The computed lock key
      * @dev This allows multiple users to create locks with the same hashValue
@@ -61,7 +61,7 @@ contract HTLC {
     /**
      * @notice Emitted when tokens are successfully claimed by the receiver
      * @param preImage The pre-image that was revealed to claim the tokens
-     * @param hashValue The keccak256 hash of the pre-image
+     * @param hashValue The SHA256 hash of the pre-image
      * @param when Timestamp when the claim occurred
      * @param amount Amount of tokens claimed
      * @param tokenAddress Address of the ERC20 token
@@ -69,7 +69,7 @@ contract HTLC {
      * @param receiverAddress Address of the receiver who claimed
      */
     event Claimed(
-        bytes preImage,
+        string preImage,
         bytes32 hashValue,
         uint256 when,
         uint256 amount,
@@ -80,7 +80,7 @@ contract HTLC {
 
     /**
      * @notice Emitted when tokens are successfully locked
-     * @param hashValue The keccak256 hash of the pre-image
+     * @param hashValue The SHA256 hash of the pre-image
      * @param when The unlock time for this lock
      * @param amount Amount of tokens locked
      * @param tokenAddress Address of the ERC20 token
@@ -98,7 +98,7 @@ contract HTLC {
 
     /**
      * @notice Emitted when tokens are retaken by the sender after unlock time
-     * @param hashValue The keccak256 hash of the pre-image
+     * @param hashValue The SHA256 hash of the pre-image
      * @param when Timestamp when the retake occurred
      * @param amount Amount of tokens retaken
      * @param tokenAddress Address of the ERC20 token
@@ -119,14 +119,15 @@ contract HTLC {
      * @param preImage The secret pre-image that hashes to the hashValue used in lock()
      * @param senderAddress The address of the sender who created the lock
      * @dev The pre-image must hash to the hashValue used when locking
+     * @dev Uses SHA256 for hash computation (to match DAML contracts which use SHA256)
      * @dev Can only be called by the receiver before unlockTime
      * @dev Uses Checks-Effects-Interactions pattern: delete lock before external call
      * @custom:security Reentrancy protection: state is cleared before external call
      */
-    function claim(bytes calldata preImage, address senderAddress) external {
+    function claim(string calldata preImage, address senderAddress) external {
         if (senderAddress == address(0)) revert ZeroAddress();
         
-        bytes32 hashValue = keccak256(preImage);
+        bytes32 hashValue = sha256(bytes(preImage));
         bytes32 lockKey = getLockKey(hashValue, senderAddress);
         Lock storage l = locks[lockKey];
         uint256 amount = l.amount;
@@ -159,7 +160,7 @@ contract HTLC {
 
     /**
      * @notice Locks ERC20 tokens with a hash commitment and time-based unlock
-     * @param hashValue The keccak256 hash of the pre-image (secret)
+     * @param hashValue The SHA256 hash of the pre-image (secret)
      * @param unlockTime Timestamp after which the sender can retake tokens if not claimed
      * @param amount Amount of tokens to lock
      * @param tokenAddress Address of the ERC20 token contract
@@ -167,6 +168,7 @@ contract HTLC {
      * @dev The sender must have approved this contract to spend at least `amount` tokens
      * @dev unlockTime must be in the future (checked implicitly by claim/retake logic)
      * @dev Prevents duplicate locks with same hashValue and sender
+     * @dev Uses SHA256 for hash computation (to match DAML contracts which use SHA256)
      * @custom:security Reentrancy protection: state is set before external call
      */
     function lock(
@@ -207,7 +209,7 @@ contract HTLC {
 
     /**
      * @notice Allows the sender to retake locked tokens after the unlock time has elapsed
-     * @param hashValue The keccak256 hash that was used when locking
+     * @param hashValue The SHA256 hash that was used when locking
      * @dev Can only be called by the original sender after unlockTime
      * @dev Uses Checks-Effects-Interactions pattern: delete lock before external call
      * @custom:security Reentrancy protection: state is cleared before external call
@@ -243,7 +245,7 @@ contract HTLC {
 
     /**
      * @notice Retrieves lock information by hashValue and senderAddress
-     * @param hashValue The keccak256 hash used when locking
+     * @param hashValue The SHA256 hash used when locking
      * @param senderAddress The address of the sender who created the lock
      * @return unlockTime Timestamp after which sender can retake
      * @return amount Amount of tokens locked

@@ -1,6 +1,15 @@
 import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { expect } from "chai";
 import { ethers } from "hardhat";
+import { createHash } from "crypto";
+
+// Helper function to compute SHA256 hash (matching contract's sha256(bytes(string)) function)
+// The contract converts the string to UTF-8 bytes, then computes SHA256
+function sha256(data: string): string {
+  const buffer = Buffer.from(data, "utf8");
+  const hash = createHash("sha256").update(buffer).digest();
+  return "0x" + hash.toString("hex");
+}
 
 describe("HTLC", function () {
   // We define a fixture to reuse the same setup in every test.
@@ -32,7 +41,7 @@ describe("HTLC", function () {
     await testToken.connect(bob).approve(htlcAddress, 100);
 
     const preImage = "0xffffff";
-    const hashValue = ethers.keccak256(preImage);
+    const hashValue = sha256(preImage);
 
     return { htlc, htlcAddress, testToken, testTokenAddress, alice, bob, preImage, hashValue, unlockTime };
   }
@@ -500,7 +509,7 @@ describe("HTLC", function () {
 
     it("Should return zero values for non-existent lock", async function () {
       const { htlc, alice, hashValue } = await loadFixture(deployHTLCFixture);
-      const nonExistentHash = ethers.keccak256("0x123456");
+      const nonExistentHash = sha256("0x123456");
 
       const lock = await htlc.getLock(nonExistentHash, alice.address);
       expect(lock.unlockTime).to.equal(0);
@@ -568,9 +577,9 @@ describe("HTLC", function () {
       const lockedAmount = 5;
 
       const preImage1 = "0xaaaaaa";
-      const hashValue1 = ethers.keccak256(preImage1);
+      const hashValue1 = sha256(preImage1);
       const preImage2 = "0xbbbbbb";
-      const hashValue2 = ethers.keccak256(preImage2);
+      const hashValue2 = sha256(preImage2);
 
       await htlc.connect(alice).lock(hashValue1, unlockTime, lockedAmount, testTokenAddress, bob.address);
       await htlc.connect(alice).lock(hashValue2, unlockTime, lockedAmount, testTokenAddress, bob.address);

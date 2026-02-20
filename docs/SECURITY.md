@@ -42,8 +42,8 @@ We actively support the following versions of the HTLC contract:
    - This is a known limitation of blockchain-based time
 
 3. **Hash Collision**: 
-   - While extremely unlikely, keccak256 hash collisions are theoretically possible
-   - The contract uses keccak256 which is cryptographically secure
+   - While extremely unlikely, sha256 hash collisions are theoretically possible
+   - The contract uses sha256 which is cryptographically secure
 
 4. **Pre-image Discovery**:
    - If the pre-image is weak or predictable, funds could be stolen
