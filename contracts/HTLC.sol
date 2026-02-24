@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./interfaces/IPermit2.sol";
 import "./interfaces/IERC20Permit.sol";
+import "./interfaces/IHTLC.sol";
 
 /**
  * @title HTLC
@@ -14,7 +15,7 @@ import "./interfaces/IERC20Permit.sol";
  *      The receiver can claim tokens by revealing the pre-image before unlock time,
  *      or the sender can retake tokens after the unlock time has elapsed.
  */
-contract HTLC is Ownable {
+contract HTLC is Ownable, IHTLC {
     
     error ZeroAddress();
     error ZeroAmount();
