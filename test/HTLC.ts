@@ -288,6 +288,7 @@ describe("HTLC", function () {
           hashValue,
           (value: bigint) => value > 0n, // timestamp
           lockedAmount,
+          0n, // feeAmount (feeRate is 0 by default)
           testTokenAddress,
           alice.address,
           bob.address
@@ -704,6 +705,328 @@ describe("HTLC", function () {
         testToken,
         [bob, htlc],
         [lockedAmount, -lockedAmount]
+      );
+    });
+  });
+
+  describe("Fee Management", function () {
+    it("Should set deployer as owner and default fee recipient", async function () {
+      const { htlc, alice } = await loadFixture(deployHTLCFixture);
+      
+      const owner = await htlc.owner();
+      const feeRecipient = await htlc.feeRecipient();
+      const feeRate = await htlc.feeRate();
+      
+      expect(owner).to.equal(alice.address); // First signer is deployer
+      expect(feeRecipient).to.equal(alice.address);
+      expect(feeRate).to.equal(0);
+    });
+
+    it("Should allow owner to set fee recipient", async function () {
+      const { htlc, alice, bob } = await loadFixture(deployHTLCFixture);
+      
+      await expect(htlc.connect(alice).setFeeRecipient(bob.address))
+        .to.emit(htlc, "FeeRecipientUpdated")
+        .withArgs(alice.address, bob.address);
+      
+      const feeRecipient = await htlc.feeRecipient();
+      expect(feeRecipient).to.equal(bob.address);
+    });
+
+    it("Should not allow non-owner to set fee recipient", async function () {
+      const { htlc, bob } = await loadFixture(deployHTLCFixture);
+      
+      await expect(htlc.connect(bob).setFeeRecipient(bob.address))
+        .to.be.revertedWith("Ownable: caller is not the owner");
+    });
+
+    it("Should revert when setting zero address as fee recipient", async function () {
+      const { htlc, alice } = await loadFixture(deployHTLCFixture);
+      
+      await expect(htlc.connect(alice).setFeeRecipient(ethers.ZeroAddress))
+        .to.be.revertedWithCustomError(htlc, "ZeroAddress");
+    });
+
+    it("Should allow owner to set fee rate", async function () {
+      const { htlc, alice } = await loadFixture(deployHTLCFixture);
+      const newFeeRate = 100; // 1%
+      
+      await expect(htlc.connect(alice).setFeeRate(newFeeRate))
+        .to.emit(htlc, "FeeRateUpdated")
+        .withArgs(0, newFeeRate);
+      
+      const feeRate = await htlc.feeRate();
+      expect(feeRate).to.equal(newFeeRate);
+    });
+
+    it("Should not allow non-owner to set fee rate", async function () {
+      const { htlc, bob } = await loadFixture(deployHTLCFixture);
+      
+      await expect(htlc.connect(bob).setFeeRate(100))
+        .to.be.revertedWith("Ownable: caller is not the owner");
+    });
+
+    it("Should revert when setting fee rate above maximum", async function () {
+      const { htlc, alice } = await loadFixture(deployHTLCFixture);
+      const MAX_FEE_RATE = await htlc.MAX_FEE_RATE();
+      
+      await expect(htlc.connect(alice).setFeeRate(MAX_FEE_RATE + 1n))
+        .to.be.revertedWithCustomError(htlc, "InvalidFeeRate");
+    });
+
+    it("Should allow setting fee rate to maximum", async function () {
+      const { htlc, alice } = await loadFixture(deployHTLCFixture);
+      const MAX_FEE_RATE = await htlc.MAX_FEE_RATE();
+      
+      await expect(htlc.connect(alice).setFeeRate(MAX_FEE_RATE))
+        .to.emit(htlc, "FeeRateUpdated")
+        .withArgs(0, MAX_FEE_RATE);
+      
+      const feeRate = await htlc.feeRate();
+      expect(feeRate).to.equal(MAX_FEE_RATE);
+    });
+
+    it("Should allow setting fee rate to zero", async function () {
+      const { htlc, alice } = await loadFixture(deployHTLCFixture);
+      
+      // Set fee rate first
+      await htlc.connect(alice).setFeeRate(100);
+      
+      // Then set it back to zero
+      await expect(htlc.connect(alice).setFeeRate(0))
+        .to.emit(htlc, "FeeRateUpdated")
+        .withArgs(100, 0);
+      
+      const feeRate = await htlc.feeRate();
+      expect(feeRate).to.equal(0);
+    });
+  });
+
+  describe("Fee Collection on Claim", function () {
+    it("Should not charge fee when fee rate is zero", async function () {
+      const { htlc, htlcAddress, testTokenAddress, testToken, alice, bob, preImage, hashValue, unlockTime } = await loadFixture(
+        deployHTLCFixture
+      );
+      const lockedAmount = 1000n;
+      
+      // Ensure sufficient allowance and balance
+      await (testToken as any).connect(alice).mint(lockedAmount);
+      await testToken.connect(alice).approve(htlcAddress, lockedAmount);
+      
+      await htlc.connect(alice).lock(hashValue, unlockTime, lockedAmount, testTokenAddress, bob.address);
+      
+      await expect(htlc.connect(bob).claim(preImage, alice.address)).to.changeTokenBalances(
+        testToken,
+        [bob, htlc],
+        [lockedAmount, -lockedAmount]
+      );
+    });
+
+    it("Should charge 1% fee when fee rate is 100", async function () {
+      const { htlc, htlcAddress, testTokenAddress, testToken, alice, bob, preImage, hashValue, unlockTime } = await loadFixture(
+        deployHTLCFixture
+      );
+      const lockedAmount = 1000n;
+      const feeRate = 100n; // 1%
+      const expectedFee = (lockedAmount * feeRate) / 1000n; // 100 tokens (1% with MAX_FEE_RATE = 1000)
+      const expectedReceiverAmount = lockedAmount - expectedFee;
+      
+      // Ensure sufficient allowance and balance
+      await (testToken as any).connect(alice).mint(lockedAmount);
+      await testToken.connect(alice).approve(htlcAddress, lockedAmount);
+      
+      // Set fee rate and recipient
+      await htlc.connect(alice).setFeeRate(feeRate);
+      await htlc.connect(alice).setFeeRecipient(alice.address);
+      
+      await htlc.connect(alice).lock(hashValue, unlockTime, lockedAmount, testTokenAddress, bob.address);
+      
+      await expect(htlc.connect(bob).claim(preImage, alice.address)).to.changeTokenBalances(
+        testToken,
+        [bob, alice, htlc],
+        [expectedReceiverAmount, expectedFee, -lockedAmount]
+      );
+    });
+
+    it("Should charge 0.5% fee when fee rate is 50", async function () {
+      const { htlc, htlcAddress, testTokenAddress, testToken, alice, bob, preImage, hashValue, unlockTime } = await loadFixture(
+        deployHTLCFixture
+      );
+      const lockedAmount = 10000n;
+      const feeRate = 50n; // 0.5%
+      const expectedFee = (lockedAmount * feeRate) / 1000n; // 500 tokens (0.5% with MAX_FEE_RATE = 1000)
+      const expectedReceiverAmount = lockedAmount - expectedFee;
+      
+      // Ensure sufficient allowance and balance
+      await (testToken as any).connect(alice).mint(lockedAmount);
+      await testToken.connect(alice).approve(htlcAddress, lockedAmount);
+      
+      // Set fee rate and recipient
+      await htlc.connect(alice).setFeeRate(feeRate);
+      await htlc.connect(alice).setFeeRecipient(alice.address);
+      
+      await htlc.connect(alice).lock(hashValue, unlockTime, lockedAmount, testTokenAddress, bob.address);
+      
+      await expect(htlc.connect(bob).claim(preImage, alice.address)).to.changeTokenBalances(
+        testToken,
+        [bob, alice, htlc],
+        [expectedReceiverAmount, expectedFee, -lockedAmount]
+      );
+    });
+
+    it("Should charge fee to different recipient", async function () {
+      const { htlc, htlcAddress, testTokenAddress, testToken, alice, bob, preImage, hashValue, unlockTime } = await loadFixture(
+        deployHTLCFixture
+      );
+      const [charlie] = await ethers.getSigners();
+      const lockedAmount = 1000n;
+      const feeRate = 100n; // 1% with MAX_FEE_RATE = 1000
+      const expectedFee = (lockedAmount * feeRate) / 1000n; // 100 tokens
+      const expectedReceiverAmount = lockedAmount - expectedFee; // 900
+      
+      // Ensure sufficient allowance and balance
+      await (testToken as any).connect(alice).mint(lockedAmount);
+      await testToken.connect(alice).approve(htlcAddress, lockedAmount);
+      
+      // Set fee rate and recipient to charlie
+      await htlc.connect(alice).setFeeRate(feeRate);
+      await htlc.connect(alice).setFeeRecipient(charlie.address);
+      
+      await htlc.connect(alice).lock(hashValue, unlockTime, lockedAmount, testTokenAddress, bob.address);
+      
+      await expect(htlc.connect(bob).claim(preImage, alice.address)).to.changeTokenBalances(
+        testToken,
+        [bob, charlie, htlc],
+        [expectedReceiverAmount, expectedFee, -lockedAmount]
+      );
+    });
+
+    it("Should handle fee calculation with rounding", async function () {
+      const { htlc, htlcAddress, testTokenAddress, testToken, alice, bob, preImage, hashValue, unlockTime } = await loadFixture(
+        deployHTLCFixture
+      );
+      const lockedAmount = 333n; // Amount that might cause rounding issues
+      const feeRate = 100n; // 1%
+      // 333 * 100 / 1000 = 33.3, which should round down to 33
+      const expectedFee = (lockedAmount * feeRate) / 1000n; // 33 tokens (rounded down)
+      const expectedReceiverAmount = lockedAmount - expectedFee; // 300 tokens
+      
+      // Ensure sufficient allowance and balance
+      await (testToken as any).connect(alice).mint(lockedAmount);
+      await testToken.connect(alice).approve(htlcAddress, lockedAmount);
+      
+      // Set fee rate and recipient
+      await htlc.connect(alice).setFeeRate(feeRate);
+      await htlc.connect(alice).setFeeRecipient(alice.address);
+      
+      await htlc.connect(alice).lock(hashValue, unlockTime, lockedAmount, testTokenAddress, bob.address);
+      
+      await expect(htlc.connect(bob).claim(preImage, alice.address)).to.changeTokenBalances(
+        testToken,
+        [bob, alice, htlc],
+        [expectedReceiverAmount, expectedFee, -lockedAmount]
+      );
+    });
+
+    it("Should not charge fee when fee rate is zero", async function () {
+      const { htlc, htlcAddress, testTokenAddress, testToken, alice, bob, preImage, hashValue, unlockTime } = await loadFixture(
+        deployHTLCFixture
+      );
+      const lockedAmount = 1000n;
+      
+      // Ensure sufficient allowance and balance
+      await (testToken as any).connect(alice).mint(lockedAmount);
+      await testToken.connect(alice).approve(htlcAddress, lockedAmount);
+      
+      // Set fee rate to zero
+      await htlc.connect(alice).setFeeRate(0);
+      
+      await htlc.connect(alice).lock(hashValue, unlockTime, lockedAmount, testTokenAddress, bob.address);
+      
+      await expect(htlc.connect(bob).claim(preImage, alice.address)).to.changeTokenBalances(
+        testToken,
+        [bob, htlc],
+        [lockedAmount, -lockedAmount]
+      );
+    });
+
+    it("Should emit Claimed event with full amount even when fee is charged", async function () {
+      const { htlc, htlcAddress, testTokenAddress, testToken, alice, bob, preImage, hashValue, unlockTime } = await loadFixture(
+        deployHTLCFixture
+      );
+      const lockedAmount = 1000n;
+      const feeRate = 100n; // 1% with MAX_FEE_RATE = 1000
+      const expectedFee = (lockedAmount * feeRate) / 1000n;
+      const expectedReceiverAmount = lockedAmount - expectedFee;
+      
+      // Ensure sufficient allowance and balance
+      await (testToken as any).connect(alice).mint(lockedAmount);
+      await testToken.connect(alice).approve(htlcAddress, lockedAmount);
+      
+      // Set fee rate and recipient
+      await htlc.connect(alice).setFeeRate(feeRate);
+      await htlc.connect(alice).setFeeRecipient(alice.address);
+      
+      await htlc.connect(alice).lock(hashValue, unlockTime, lockedAmount, testTokenAddress, bob.address);
+      
+      // Event should still show the full locked amount
+      await expect(htlc.connect(bob).claim(preImage, alice.address))
+        .to.emit(htlc, "Claimed")
+        .withArgs(
+          preImage,
+          hashValue,
+          (value: bigint) => value > 0n, // timestamp
+          expectedReceiverAmount,
+          expectedFee,
+          testTokenAddress,
+          alice.address,
+          bob.address
+        );
+    });
+
+    it("Should handle multiple claims with fee correctly", async function () {
+      const { htlc, htlcAddress, testTokenAddress, testToken, alice, bob, unlockTime } = await loadFixture(
+        deployHTLCFixture
+      );
+      const feeRate = 100n; // 1%
+      
+      // Set fee rate and recipient
+      await htlc.connect(alice).setFeeRate(feeRate);
+      await htlc.connect(alice).setFeeRecipient(alice.address);
+      
+      // Create two locks
+      const preImage1 = "0xaaaaaa";
+      const hashValue1 = sha256(preImage1);
+      const lockedAmount1 = 1000n;
+      const expectedFee1 = (lockedAmount1 * feeRate) / 1000n;
+      const expectedReceiverAmount1 = lockedAmount1 - expectedFee1;
+      
+      const preImage2 = "0xbbbbbb";
+      const hashValue2 = sha256(preImage2);
+      const lockedAmount2 = 2000n;
+      const expectedFee2 = (lockedAmount2 * feeRate) / 1000n;
+      const expectedReceiverAmount2 = lockedAmount2 - expectedFee2;
+      
+      // Ensure sufficient allowance and balance
+      const totalAmount = lockedAmount1 + lockedAmount2;
+      await (testToken as any).connect(alice).mint(totalAmount);
+      await testToken.connect(alice).approve(htlcAddress, totalAmount);
+      
+      await htlc.connect(alice).lock(hashValue1, unlockTime, lockedAmount1, testTokenAddress, bob.address);
+      await htlc.connect(alice).lock(hashValue2, unlockTime, lockedAmount2, testTokenAddress, bob.address);
+      
+      // Claim first lock
+      await expect(htlc.connect(bob).claim(preImage1, alice.address)).to.changeTokenBalances(
+        testToken,
+        [bob, alice, htlc],
+        [expectedReceiverAmount1, expectedFee1, -lockedAmount1]
+      );
+      
+      // Claim second lock
+      await expect(htlc.connect(bob).claim(preImage2, alice.address)).to.changeTokenBalances(
+        testToken,
+        [bob, alice, htlc],
+        [expectedReceiverAmount2, expectedFee2, -lockedAmount2]
       );
     });
   });

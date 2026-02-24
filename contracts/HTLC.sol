@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.33;
 
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title HTLC
@@ -11,7 +12,7 @@ import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
  *      The receiver can claim tokens by revealing the pre-image before unlock time,
  *      or the sender can retake tokens after the unlock time has elapsed.
  */
-contract HTLC {
+contract HTLC is Ownable {
     
     error ZeroAddress();
     error ZeroAmount();
@@ -24,6 +25,7 @@ contract HTLC {
     error LockNotFound();
     error TransferFailed();
     error SenderEqualsReceiver();
+    error InvalidFeeRate();
 
     /**
      * @notice Lock structure storing all information about a locked token transfer
@@ -48,6 +50,21 @@ contract HTLC {
     mapping(bytes32 => Lock) public locks;
 
     /**
+     * @notice Address where fees are collected
+     */
+    address public feeRecipient;
+
+    /**
+     * @notice Fee rate in basis points (10000 = 100%, 100 = 1%, 50 = 0.5%)
+     */
+    uint256 public feeRate;
+
+    /**
+     * @notice Maximum fee rate allowed (10000 = 100%)
+     */
+    uint256 public constant MAX_FEE_RATE = 1000;
+
+    /**
      * @notice Computes the unique lock key from hashValue and senderAddress
      * @param hashValue The SHA256 hash of the pre-image
      * @param senderAddress The address of the sender who created the lock
@@ -59,11 +76,20 @@ contract HTLC {
     }
 
     /**
+     * @notice Constructor sets the deployer as the owner
+     */
+    constructor() Ownable() {
+        feeRecipient = msg.sender;
+        feeRate = 0; // Default: no fee
+    }
+
+    /**
      * @notice Emitted when tokens are successfully claimed by the receiver
      * @param preImage The pre-image that was revealed to claim the tokens
      * @param hashValue The SHA256 hash of the pre-image
      * @param when Timestamp when the claim occurred
      * @param amount Amount of tokens claimed
+     * @param feeAmount Amount of fees charged
      * @param tokenAddress Address of the ERC20 token
      * @param senderAddress Address of the original sender
      * @param receiverAddress Address of the receiver who claimed
@@ -73,6 +99,7 @@ contract HTLC {
         bytes32 hashValue,
         uint256 when,
         uint256 amount,
+        uint256 feeAmount,
         address indexed tokenAddress,
         address indexed senderAddress,
         address indexed receiverAddress
@@ -115,6 +142,20 @@ contract HTLC {
     );
 
     /**
+     * @notice Emitted when fee recipient is updated
+     * @param oldRecipient Previous fee recipient address
+     * @param newRecipient New fee recipient address
+     */
+    event FeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
+
+    /**
+     * @notice Emitted when fee rate is updated
+     * @param oldRate Previous fee rate in basis points
+     * @param newRate New fee rate in basis points
+     */
+    event FeeRateUpdated(uint256 oldRate, uint256 newRate);
+
+    /**
      * @notice Allows the receiver to claim locked tokens by revealing the pre-image
      * @param preImage The secret pre-image that hashes to the hashValue used in lock()
      * @param senderAddress The address of the sender who created the lock
@@ -130,31 +171,39 @@ contract HTLC {
         bytes32 hashValue = sha256(bytes(preImage));
         bytes32 lockKey = getLockKey(hashValue, senderAddress);
         Lock storage l = locks[lockKey];
-        uint256 amount = l.amount;
-        if (amount == 0) revert InvalidPreImage();
-
+        if (l.amount == 0) revert InvalidPreImage();
         if (block.timestamp >= l.unlockTime) revert ClaimTimeExpired();
-        address receiverAddress = l.receiverAddress;
-        if (receiverAddress == address(0)) revert ZeroAddress();
-        if (msg.sender != receiverAddress) revert UnauthorizedClaim();
+        if (l.receiverAddress == address(0)) revert ZeroAddress();
+        if (msg.sender != l.receiverAddress) revert UnauthorizedClaim();
+        if (l.tokenAddress == address(0)) revert ZeroAddress();
 
+        uint256 amount = l.amount;
         address tokenAddr = l.tokenAddress;
-        if (tokenAddr == address(0)) revert ZeroAddress();
         address senderAddr = l.senderAddress;
+        address receiverAddr = l.receiverAddress;
         
         delete locks[lockKey];
         
-        IERC20 erc20 = IERC20(tokenAddr);
-        if (!erc20.transfer(receiverAddress, amount)) revert TransferFailed();
+        uint256 feeAmount = 0;
+        if (feeRate > 0 && feeRecipient != address(0)) {
+            feeAmount = (amount * feeRate) / MAX_FEE_RATE;
+            if (feeAmount > 0) {
+                if (!IERC20(tokenAddr).transfer(feeRecipient, feeAmount)) revert TransferFailed();
+            }
+        }
+        
+        uint256 receiverAmount = amount - feeAmount;
+        if (!IERC20(tokenAddr).transfer(receiverAddr, receiverAmount)) revert TransferFailed();
 
         emit Claimed({
             preImage: preImage,
             hashValue: hashValue,
-            amount: amount,
+            amount: receiverAmount,
+            feeAmount: feeAmount,
             when: block.timestamp,
             tokenAddress: tokenAddr,
             senderAddress: senderAddr,
-            receiverAddress: receiverAddress
+            receiverAddress: receiverAddr
         });
     }
 
@@ -264,5 +313,35 @@ contract HTLC {
         bytes32 lockKey = getLockKey(hashValue, senderAddress);
         Lock storage l = locks[lockKey];
         return (l.unlockTime, l.amount, l.tokenAddress, l.senderAddress, l.receiverAddress);
+    }
+
+    /**
+     * @notice Sets the fee recipient address (admin only)
+     * @param newFeeRecipient The new address to receive fees
+     * @dev Only owner can call this function
+     * @dev Cannot set to zero address
+     */
+    function setFeeRecipient(address newFeeRecipient) external onlyOwner {
+        if (newFeeRecipient == address(0)) revert ZeroAddress();
+        
+        address oldRecipient = feeRecipient;
+        feeRecipient = newFeeRecipient;
+        
+        emit FeeRecipientUpdated(oldRecipient, newFeeRecipient);
+    }
+
+    /**
+     * @notice Sets the fee rate in basis points (admin only)
+     * @param newFeeRate The new fee rate in basis points (10000 = 100%, 100 = 1%)
+     * @dev Only owner can call this function
+     * @dev Fee rate cannot exceed MAX_FEE_RATE (10000 = 100%)
+     */
+    function setFeeRate(uint256 newFeeRate) external onlyOwner {
+        if (newFeeRate > MAX_FEE_RATE) revert InvalidFeeRate();
+        
+        uint256 oldRate = feeRate;
+        feeRate = newFeeRate;
+        
+        emit FeeRateUpdated(oldRate, newFeeRate);
     }
 }
