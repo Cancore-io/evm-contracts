@@ -1131,5 +1131,260 @@ describe("HTLC", function () {
           )
       ).to.be.revertedWithCustomError(htlc, "InvalidPermit2Parameters");
     });
+
+    it("Should emit Permit2Updated event when setting Permit2 address", async function () {
+      const { htlc, alice } = await loadFixture(deployHTLCFixture);
+
+      // Get current Permit2 address (should be mockPermit2 from fixture)
+      const currentPermit2 = await htlc.permit2();
+
+      // Deploy a new MockPermit2
+      const MockPermit2 = await ethers.getContractFactory("MockPermit2");
+      const newMockPermit2 = await MockPermit2.deploy();
+      await newMockPermit2.waitForDeployment();
+      const newPermit2Address = await newMockPermit2.getAddress();
+
+      // Set new Permit2 address and verify event
+      await expect(htlc.connect(alice).setPermit2(newPermit2Address))
+        .to.emit(htlc, "Permit2Updated")
+        .withArgs(currentPermit2, newPermit2Address);
+
+      // Verify the address was actually updated
+      const updatedPermit2 = await htlc.permit2();
+      expect(updatedPermit2).to.equal(newPermit2Address);
+    });
+  });
+
+  describe("EIP-2612 Permit Locking", function () {
+    async function deployHTLCWithPermitTokenFixture() {
+      const ONE_YEAR_IN_SECS = 365n * 24n * 60n * 60n;
+      const latestTime = await time.latest();
+      const unlockTime = BigInt(latestTime) + ONE_YEAR_IN_SECS;
+
+      const [alice, bob] = await ethers.getSigners();
+
+      const HTLC = await ethers.getContractFactory("HTLC");
+      const htlc = await HTLC.deploy();
+      await htlc.waitForDeployment();
+      const htlcAddress = await htlc.getAddress();
+
+      const TestTokenWithPermit = await ethers.getContractFactory("TestTokenWithPermit");
+      const testTokenWithPermit = await (TestTokenWithPermit as any).deploy("TestTokenPermit", "TTP");
+      await testTokenWithPermit.waitForDeployment();
+      const testTokenWithPermitAddress = await testTokenWithPermit.getAddress();
+
+      const preImage = "0xffffff";
+      const hashValue = sha256(preImage);
+
+      return { htlc, htlcAddress, testTokenWithPermit, testTokenWithPermitAddress, alice, bob, preImage, hashValue, unlockTime };
+    }
+
+    it("Should lock tokens via lockWithPermit and emit Locked event", async function () {
+      const { htlc, htlcAddress, testTokenWithPermit, testTokenWithPermitAddress, alice, bob, hashValue, unlockTime } =
+        await loadFixture(deployHTLCWithPermitTokenFixture);
+
+      const lockedAmount = 10n;
+      await (testTokenWithPermit as any).connect(alice).mint(lockedAmount);
+
+      const latestTime = await time.latest();
+      const deadline = BigInt(latestTime) + 3600n;
+
+      // Get the domain separator and create permit signature
+      // ERC20Permit uses version "1" by default
+      const domain = {
+        name: await testTokenWithPermit.name(),
+        version: "1",
+        chainId: (await ethers.provider.getNetwork()).chainId,
+        verifyingContract: await testTokenWithPermit.getAddress(),
+      };
+
+      const types = {
+        Permit: [
+          { name: "owner", type: "address" },
+          { name: "spender", type: "address" },
+          { name: "value", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+        ],
+      };
+
+      const nonce = await testTokenWithPermit.nonces(alice.address);
+      const value = {
+        owner: alice.address,
+        spender: htlcAddress,
+        value: lockedAmount,
+        nonce: nonce,
+        deadline: deadline,
+      };
+
+      const signature = await alice.signTypedData(domain, types, value);
+      const sig = ethers.Signature.from(signature);
+
+      await expect(
+        htlc
+          .connect(alice)
+          .lockWithPermit(
+            hashValue,
+            unlockTime,
+            lockedAmount,
+            testTokenWithPermitAddress,
+            bob.address,
+            deadline,
+            sig.v,
+            sig.r,
+            sig.s
+          )
+      )
+        .to.emit(htlc, "Locked")
+        .withArgs(hashValue, unlockTime, lockedAmount, testTokenWithPermitAddress, alice.address, bob.address);
+
+      // Verify lock data stored correctly
+      const lock = await htlc.getLock(hashValue, alice.address);
+      expect(lock.amount).to.equal(lockedAmount);
+      expect(lock.tokenAddress).to.equal(testTokenWithPermitAddress);
+      expect(lock.senderAddr).to.equal(alice.address);
+      expect(lock.receiverAddress).to.equal(bob.address);
+    });
+
+    it("Should transfer tokens to HTLC contract on lockWithPermit", async function () {
+      const { htlc, htlcAddress, testTokenWithPermit, testTokenWithPermitAddress, alice, bob, hashValue, unlockTime } =
+        await loadFixture(deployHTLCWithPermitTokenFixture);
+
+      const lockedAmount = 10n;
+      await (testTokenWithPermit as any).connect(alice).mint(lockedAmount);
+
+      const latestTime = await time.latest();
+      const deadline = BigInt(latestTime) + 3600n;
+
+      const domain = {
+        name: await testTokenWithPermit.name(),
+        version: "1",
+        chainId: (await ethers.provider.getNetwork()).chainId,
+        verifyingContract: await testTokenWithPermit.getAddress(),
+      };
+
+      const types = {
+        Permit: [
+          { name: "owner", type: "address" },
+          { name: "spender", type: "address" },
+          { name: "value", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+        ],
+      };
+
+      const nonce = await testTokenWithPermit.nonces(alice.address);
+      const value = {
+        owner: alice.address,
+        spender: htlcAddress,
+        value: lockedAmount,
+        nonce: nonce,
+        deadline: deadline,
+      };
+
+      const signature = await alice.signTypedData(domain, types, value);
+      const sig = ethers.Signature.from(signature);
+
+      await expect(
+        htlc
+          .connect(alice)
+          .lockWithPermit(
+            hashValue,
+            unlockTime,
+            lockedAmount,
+            testTokenWithPermitAddress,
+            bob.address,
+            deadline,
+            sig.v,
+            sig.r,
+            sig.s
+          )
+      ).to.changeTokenBalances(
+        testTokenWithPermit,
+        [alice, htlc],
+        [-lockedAmount, lockedAmount]
+      );
+    });
+
+    it("Should revert when permit deadline has expired", async function () {
+      const { htlc, htlcAddress, testTokenWithPermit, testTokenWithPermitAddress, alice, bob, hashValue, unlockTime } =
+        await loadFixture(deployHTLCWithPermitTokenFixture);
+
+      const lockedAmount = 10n;
+      await (testTokenWithPermit as any).connect(alice).mint(lockedAmount);
+
+      const latestTime = await time.latest();
+      const deadline = BigInt(latestTime) - 1n; // Expired deadline
+
+      const domain = {
+        name: await testTokenWithPermit.name(),
+        version: "1",
+        chainId: (await ethers.provider.getNetwork()).chainId,
+        verifyingContract: await testTokenWithPermit.getAddress(),
+      };
+
+      const types = {
+        Permit: [
+          { name: "owner", type: "address" },
+          { name: "spender", type: "address" },
+          { name: "value", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+        ],
+      };
+
+      const nonce = await testTokenWithPermit.nonces(alice.address);
+      const value = {
+        owner: alice.address,
+        spender: htlcAddress,
+        value: lockedAmount,
+        nonce: nonce,
+        deadline: deadline,
+      };
+
+      const signature = await alice.signTypedData(domain, types, value);
+      const sig = ethers.Signature.from(signature);
+
+      await expect(
+        htlc
+          .connect(alice)
+          .lockWithPermit(
+            hashValue,
+            unlockTime,
+            lockedAmount,
+            testTokenWithPermitAddress,
+            bob.address,
+            deadline,
+            sig.v,
+            sig.r,
+            sig.s
+          )
+      ).to.be.revertedWithCustomError(htlc, "InvalidPermitParameters");
+    });
+
+    it("Should revert if token does not support permit", async function () {
+      const { htlc, testTokenAddress, alice, bob, hashValue, unlockTime } = await loadFixture(deployHTLCFixture);
+
+      const lockedAmount = 10n;
+      const latestTime = await time.latest();
+      const deadline = BigInt(latestTime) + 3600n;
+
+      // Try to use regular TestToken (without permit support)
+      await expect(
+        htlc
+          .connect(alice)
+          .lockWithPermit(
+            hashValue,
+            unlockTime,
+            lockedAmount,
+            testTokenAddress,
+            bob.address,
+            deadline,
+            0,
+            ethers.ZeroHash,
+            ethers.ZeroHash
+          )
+      ).to.be.reverted; // Should revert because TestToken doesn't have permit function
+    });
   });
 });

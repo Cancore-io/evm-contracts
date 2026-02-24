@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./interfaces/IPermit2.sol";
+import "./interfaces/IERC20Permit.sol";
 
 /**
  * @title HTLC
@@ -29,6 +30,7 @@ contract HTLC is Ownable {
     error InvalidFeeRate();
     error Permit2NotSet();
     error InvalidPermit2Parameters();
+    error InvalidPermitParameters();
 
     /**
      * @notice Lock structure storing all information about a locked token transfer
@@ -165,6 +167,13 @@ contract HTLC is Ownable {
     event FeeRateUpdated(uint256 oldRate, uint256 newRate);
 
     /**
+     * @notice Emitted when Permit2 contract address is updated
+     * @param oldPermit2 Previous Permit2 contract address
+     * @param newPermit2 New Permit2 contract address
+     */
+    event Permit2Updated(address indexed oldPermit2, address indexed newPermit2);
+
+    /**
      * @notice Allows the receiver to claim locked tokens by revealing the pre-image
      * @param preImage The secret pre-image that hashes to the hashValue used in lock()
      * @param senderAddress The address of the sender who created the lock
@@ -277,23 +286,69 @@ contract HTLC is Ownable {
         if (receiverAddress == msg.sender) revert SenderEqualsReceiver();
         if (amount == 0) revert ZeroAmount();
 
-        // Validate Permit2 parameters are consistent with the requested lock
         if (permit.permitted.token != tokenAddress) revert InvalidPermit2Parameters();
         if (permit.permitted.amount < amount) revert InvalidPermit2Parameters();
         if (transferDetails.to != address(this)) revert InvalidPermit2Parameters();
         if (transferDetails.requestedAmount != amount) revert InvalidPermit2Parameters();
         
-        // Validate permit deadline (Permit2 requirement: signature must not be expired)
         if (block.timestamp > permit.deadline) revert InvalidPermit2Parameters();
 
-        // Pull tokens via Permit2 using msg.sender as the owner
-        // Permit2 will verify the signature and transfer tokens from owner to this contract
         IPermit2(permit2).permitTransferFrom(
             permit,
             transferDetails,
             msg.sender,
             signature
         );
+
+        _lock(hashValue, unlockTime, amount, tokenAddress, msg.sender, receiverAddress);
+    }
+
+    /**
+     * @notice Locks ERC20 tokens using EIP-2612 permit for gasless approval
+     * @param hashValue The SHA256 hash of the pre-image (secret)
+     * @param unlockTime Timestamp after which the sender can retake tokens if not claimed
+     * @param amount Amount of tokens to lock
+     * @param tokenAddress Address of the ERC20 token contract (must support EIP-2612 permit)
+     * @param receiverAddress Address of the user who can claim with the pre-image
+     * @param deadline The timestamp after which the permit is no longer valid
+     * @param v The recovery byte of the signature
+     * @param r Half of the ECDSA signature pair
+     * @param s Half of the ECDSA signature pair
+     * @dev Uses EIP-2612 permit to set allowance, then transfers tokens to this contract
+     * @dev The token must support EIP-2612 permit functionality
+     * @dev Follows Checks-Effects-Interactions: state is updated after successful token transfer
+     * @custom:security The permit must be specifically bound to this contract and the expected amount
+     */
+    function lockWithPermit(
+        bytes32 hashValue,
+        uint256 unlockTime,
+        uint256 amount,
+        address tokenAddress,
+        address receiverAddress,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external {
+        if (tokenAddress == address(0)) revert ZeroAddress();
+        if (receiverAddress == address(0)) revert ZeroAddress();
+        if (receiverAddress == msg.sender) revert SenderEqualsReceiver();
+        if (amount == 0) revert ZeroAmount();
+
+        if (block.timestamp > deadline) revert InvalidPermitParameters();
+
+        IERC20Permit(tokenAddress).permit(
+            msg.sender,
+            address(this),
+            amount,
+            deadline,
+            v,
+            r,
+            s
+        );
+
+        IERC20 erc20 = IERC20(tokenAddress);
+        if (!erc20.transferFrom(msg.sender, address(this), amount)) revert TransferFailed();
 
         _lock(hashValue, unlockTime, amount, tokenAddress, msg.sender, receiverAddress);
     }
@@ -373,8 +428,10 @@ contract HTLC is Ownable {
     function setPermit2(address newPermit2) external onlyOwner {
         if (newPermit2 == address(0)) revert ZeroAddress();
 
+        address oldPermit2 = permit2;
         permit2 = newPermit2;
-        // No event emitted to keep the interface minimal; can be added later if needed
+
+        emit Permit2Updated(oldPermit2, newPermit2);
     }
 
     /**
