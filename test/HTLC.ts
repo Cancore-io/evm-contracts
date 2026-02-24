@@ -28,6 +28,12 @@ describe("HTLC", function () {
     await htlc.waitForDeployment();
     const htlcAddress = await htlc.getAddress();
 
+    // Deploy MockPermit2 and configure HTLC
+    const MockPermit2 = await ethers.getContractFactory("MockPermit2");
+    const mockPermit2 = await MockPermit2.deploy();
+    await mockPermit2.waitForDeployment();
+    await htlc.connect(alice).setPermit2(await mockPermit2.getAddress());
+
     const TestToken = await ethers.getContractFactory("TestToken");
     // Cast to any to bypass outdated typechain constructor typing
     const testToken = await (TestToken as any).deploy("TestToken", "TT");
@@ -43,7 +49,7 @@ describe("HTLC", function () {
     const preImage = "0xffffff";
     const hashValue = sha256(preImage);
 
-    return { htlc, htlcAddress, testToken, testTokenAddress, alice, bob, preImage, hashValue, unlockTime };
+    return { htlc, htlcAddress, testToken, testTokenAddress, alice, bob, preImage, hashValue, unlockTime, mockPermit2 };
   }
 
   describe("Locking", function () {
@@ -1028,6 +1034,102 @@ describe("HTLC", function () {
         [bob, alice, htlc],
         [expectedReceiverAmount2, expectedFee2, -lockedAmount2]
       );
+    });
+  });
+
+  describe("Permit2 Locking", function () {
+    it("Should lock tokens via lockWithPermit2 and emit Locked event", async function () {
+      const { htlc, htlcAddress, testToken, testTokenAddress, alice, bob, preImage, hashValue, unlockTime, mockPermit2 } =
+        await loadFixture(deployHTLCFixture);
+
+      const lockedAmount = 10n;
+
+      // Mint and approve tokens for MockPermit2 to pull via transferFrom
+      await (testToken as any).connect(alice).mint(lockedAmount);
+      await testToken.connect(alice).approve(await mockPermit2.getAddress(), lockedAmount);
+
+      const latestTime = await time.latest();
+      const permit = {
+        permitted: {
+          token: testTokenAddress,
+          amount: lockedAmount,
+        },
+        nonce: 0n,
+        deadline: BigInt(latestTime) + 3600n,
+      };
+
+      const transferDetails = {
+        to: htlcAddress,
+        requestedAmount: lockedAmount,
+      };
+
+      const signature = "0x";
+
+      await expect(
+        htlc
+          .connect(alice)
+          .lockWithPermit2(
+            hashValue,
+            unlockTime,
+            lockedAmount,
+            testTokenAddress,
+            bob.address,
+            permit,
+            transferDetails,
+            signature
+          )
+      )
+        .to.emit(htlc, "Locked")
+        .withArgs(hashValue, unlockTime, lockedAmount, testTokenAddress, alice.address, bob.address);
+
+      // Verify lock data stored correctly
+      const lock = await htlc.getLock(hashValue, alice.address);
+      expect(lock.amount).to.equal(lockedAmount);
+      expect(lock.tokenAddress).to.equal(testTokenAddress);
+      expect(lock.senderAddr).to.equal(alice.address);
+      expect(lock.receiverAddress).to.equal(bob.address);
+    });
+
+    it("Should revert when permit deadline has expired", async function () {
+      const { htlc, htlcAddress, testToken, testTokenAddress, alice, bob, hashValue, unlockTime, mockPermit2 } =
+        await loadFixture(deployHTLCFixture);
+
+      const lockedAmount = 10n;
+
+      // Mint and approve tokens for MockPermit2
+      await (testToken as any).connect(alice).mint(lockedAmount);
+      await testToken.connect(alice).approve(await mockPermit2.getAddress(), lockedAmount);
+
+      const latestTime = await time.latest();
+      // Set deadline in the past
+      const permit = {
+        permitted: {
+          token: testTokenAddress,
+          amount: lockedAmount,
+        },
+        nonce: 0n,
+        deadline: BigInt(latestTime) - 1n, // Expired deadline
+      };
+
+      const transferDetails = {
+        to: htlcAddress,
+        requestedAmount: lockedAmount,
+      };
+
+      await expect(
+        htlc
+          .connect(alice)
+          .lockWithPermit2(
+            hashValue,
+            unlockTime,
+            lockedAmount,
+            testTokenAddress,
+            bob.address,
+            permit,
+            transferDetails,
+            "0x"
+          )
+      ).to.be.revertedWithCustomError(htlc, "InvalidPermit2Parameters");
     });
   });
 });

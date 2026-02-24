@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "./interfaces/IPermit2.sol";
 
 /**
  * @title HTLC
@@ -26,6 +27,8 @@ contract HTLC is Ownable {
     error TransferFailed();
     error SenderEqualsReceiver();
     error InvalidFeeRate();
+    error Permit2NotSet();
+    error InvalidPermit2Parameters();
 
     /**
      * @notice Lock structure storing all information about a locked token transfer
@@ -55,6 +58,12 @@ contract HTLC is Ownable {
     address public feeRecipient;
 
     /**
+     * @notice Address of the Permit2 contract used for gasless approvals
+     * @dev Can be configured by the owner via setPermit2 and is then used in lockWithPermit2
+     */
+    address public permit2;
+
+    /**
      * @notice Fee rate in basis points (10000 = 100%, 100 = 1%, 50 = 0.5%)
      */
     uint256 public feeRate;
@@ -80,7 +89,7 @@ contract HTLC is Ownable {
      */
     constructor() Ownable() {
         feeRecipient = msg.sender;
-        feeRate = 0; // Default: no fee
+        feeRate = 0;
     }
 
     /**
@@ -218,7 +227,7 @@ contract HTLC is Ownable {
      * @dev unlockTime must be in the future (checked implicitly by claim/retake logic)
      * @dev Prevents duplicate locks with same hashValue and sender
      * @dev Uses SHA256 for hash computation (to match DAML contracts which use SHA256)
-     * @custom:security Reentrancy protection: state is set before external call
+     * @custom:security Reentrancy protection: state is set after external call
      */
     function lock(
         bytes32 hashValue,
@@ -231,29 +240,62 @@ contract HTLC is Ownable {
         if (receiverAddress == address(0)) revert ZeroAddress();
         if (receiverAddress == msg.sender) revert SenderEqualsReceiver();
         if (amount == 0) revert ZeroAmount();
-        
-        bytes32 lockKey = getLockKey(hashValue, msg.sender);
-        if (locks[lockKey].amount != 0) revert LockAlreadyExists();
-
-        locks[lockKey] = Lock({
-            unlockTime: unlockTime,
-            amount: amount,
-            tokenAddress: tokenAddress,
-            senderAddress: msg.sender,
-            receiverAddress: receiverAddress
-        });
 
         IERC20 erc20 = IERC20(tokenAddress);
         if (!erc20.transferFrom(msg.sender, address(this), amount)) revert TransferFailed();
 
-        emit Locked({
-            hashValue: hashValue,
-            when: unlockTime,
-            amount: amount,
-            tokenAddress: tokenAddress,
-            senderAddress: msg.sender,
-            receiverAddress: receiverAddress
-        });
+        _lock(hashValue, unlockTime, amount, tokenAddress, msg.sender, receiverAddress);
+    }
+
+    /**
+     * @notice Locks ERC20 tokens using Uniswap Permit2 for gasless approval
+     * @param hashValue The SHA256 hash of the pre-image (secret)
+     * @param unlockTime Timestamp after which the sender can retake tokens if not claimed
+     * @param amount Amount of tokens to lock
+     * @param tokenAddress Address of the ERC20 token contract
+     * @param receiverAddress Address of the user who can claim with the pre-image
+     * @param permit The Permit2 permit describing the allowed token and amount
+     * @param transferDetails Transfer details specifying destination (must be this contract) and amount
+     * @param signature Off-chain signature authorizing the Permit2 transfer
+     * @dev Uses Uniswap Permit2 (Signature Transfer) to pull tokens from msg.sender without prior ERC20 approve.
+     * @dev Follows Checks-Effects-Interactions: state is updated after successful external call to Permit2.
+     * @custom:security The permit must be specifically bound to this contract and the expected amount.
+     */
+    function lockWithPermit2(
+        bytes32 hashValue,
+        uint256 unlockTime,
+        uint256 amount,
+        address tokenAddress,
+        address receiverAddress,
+        IPermit2.PermitTransferFrom calldata permit,
+        IPermit2.SignatureTransferDetails calldata transferDetails,
+        bytes calldata signature
+    ) external {
+        if (permit2 == address(0)) revert Permit2NotSet();
+        if (tokenAddress == address(0)) revert ZeroAddress();
+        if (receiverAddress == address(0)) revert ZeroAddress();
+        if (receiverAddress == msg.sender) revert SenderEqualsReceiver();
+        if (amount == 0) revert ZeroAmount();
+
+        // Validate Permit2 parameters are consistent with the requested lock
+        if (permit.permitted.token != tokenAddress) revert InvalidPermit2Parameters();
+        if (permit.permitted.amount < amount) revert InvalidPermit2Parameters();
+        if (transferDetails.to != address(this)) revert InvalidPermit2Parameters();
+        if (transferDetails.requestedAmount != amount) revert InvalidPermit2Parameters();
+        
+        // Validate permit deadline (Permit2 requirement: signature must not be expired)
+        if (block.timestamp > permit.deadline) revert InvalidPermit2Parameters();
+
+        // Pull tokens via Permit2 using msg.sender as the owner
+        // Permit2 will verify the signature and transfer tokens from owner to this contract
+        IPermit2(permit2).permitTransferFrom(
+            permit,
+            transferDetails,
+            msg.sender,
+            signature
+        );
+
+        _lock(hashValue, unlockTime, amount, tokenAddress, msg.sender, receiverAddress);
     }
 
     /**
@@ -293,29 +335,6 @@ contract HTLC is Ownable {
     }
 
     /**
-     * @notice Retrieves lock information by hashValue and senderAddress
-     * @param hashValue The SHA256 hash used when locking
-     * @param senderAddress The address of the sender who created the lock
-     * @return unlockTime Timestamp after which sender can retake
-     * @return amount Amount of tokens locked
-     * @return tokenAddress Address of the ERC20 token
-     * @return senderAddr Address of the sender
-     * @return receiverAddress Address of the receiver
-     * @dev Returns zero values if lock doesn't exist
-     */
-    function getLock(bytes32 hashValue, address senderAddress) external view returns (
-        uint256 unlockTime,
-        uint256 amount,
-        address tokenAddress,
-        address senderAddr,
-        address receiverAddress
-    ) {
-        bytes32 lockKey = getLockKey(hashValue, senderAddress);
-        Lock storage l = locks[lockKey];
-        return (l.unlockTime, l.amount, l.tokenAddress, l.senderAddress, l.receiverAddress);
-    }
-
-    /**
      * @notice Sets the fee recipient address (admin only)
      * @param newFeeRecipient The new address to receive fees
      * @dev Only owner can call this function
@@ -343,5 +362,81 @@ contract HTLC is Ownable {
         feeRate = newFeeRate;
         
         emit FeeRateUpdated(oldRate, newFeeRate);
+    }
+
+    /**
+     * @notice Sets the Permit2 contract address (admin only)
+     * @param newPermit2 The new Permit2 contract address
+     * @dev Only owner can call this function
+     * @dev Cannot set to zero address
+     */
+    function setPermit2(address newPermit2) external onlyOwner {
+        if (newPermit2 == address(0)) revert ZeroAddress();
+
+        permit2 = newPermit2;
+        // No event emitted to keep the interface minimal; can be added later if needed
+    }
+
+    /**
+     * @notice Retrieves lock information by hashValue and senderAddress
+     * @param hashValue The SHA256 hash used when locking
+     * @param senderAddress The address of the sender who created the lock
+     * @return unlockTime Timestamp after which sender can retake
+     * @return amount Amount of tokens locked
+     * @return tokenAddress Address of the ERC20 token
+     * @return senderAddr Address of the sender
+     * @return receiverAddress Address of the receiver
+     * @dev Returns zero values if lock doesn't exist
+     */
+    function getLock(bytes32 hashValue, address senderAddress) external view returns (
+        uint256 unlockTime,
+        uint256 amount,
+        address tokenAddress,
+        address senderAddr,
+        address receiverAddress
+    ) {
+        bytes32 lockKey = getLockKey(hashValue, senderAddress);
+        Lock storage l = locks[lockKey];
+        return (l.unlockTime, l.amount, l.tokenAddress, l.senderAddress, l.receiverAddress);
+    }
+
+    /**
+     * @notice Internal function to create a lock after tokens have been transferred
+     * @param hashValue The SHA256 hash of the pre-image (secret)
+     * @param unlockTime Timestamp after which the sender can retake tokens if not claimed
+     * @param amount Amount of tokens to lock
+     * @param tokenAddress Address of the ERC20 token contract
+     * @param senderAddress Address of the user who locked the tokens
+     * @param receiverAddress Address of the user who can claim with the pre-image
+     * @dev This function assumes all validations and token transfers have been completed
+     * @dev Uses Checks-Effects-Interactions pattern: effects happen after interactions
+     */
+    function _lock(
+        bytes32 hashValue,
+        uint256 unlockTime,
+        uint256 amount,
+        address tokenAddress,
+        address senderAddress,
+        address receiverAddress
+    ) internal {
+        bytes32 lockKey = getLockKey(hashValue, senderAddress);
+        if (locks[lockKey].amount != 0) revert LockAlreadyExists();
+
+        locks[lockKey] = Lock({
+            unlockTime: unlockTime,
+            amount: amount,
+            tokenAddress: tokenAddress,
+            senderAddress: senderAddress,
+            receiverAddress: receiverAddress
+        });
+
+        emit Locked({
+            hashValue: hashValue,
+            when: unlockTime,
+            amount: amount,
+            tokenAddress: tokenAddress,
+            senderAddress: senderAddress,
+            receiverAddress: receiverAddress
+        });
     }
 }
