@@ -14,3 +14,4 @@ contract TestToken is ERC20 {
         _mint(msg.sender, amount);
     }
 }
+
