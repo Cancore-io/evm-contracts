@@ -74,7 +74,7 @@ contract HTLC is Ownable, IHTLC {
     /**
      * @notice Maximum fee rate allowed (10000 = 100%)
      */
-    uint256 public constant MAX_FEE_RATE = 1000;
+    uint256 public constant MAX_FEE_RATE = 10000;
 
     /**
      * @notice Computes the unique lock key from hashValue and senderAddress
@@ -205,7 +205,12 @@ contract HTLC is Ownable, IHTLC {
         
         uint256 feeAmount = 0;
         if (feeRate > 0 && feeRecipient != address(0)) {
-            feeAmount = (amount * feeRate) / MAX_FEE_RATE;
+            // Frontends are expected to lock the total amount = principal + fee.
+            // To preserve the intended principal amount for the receiver,
+            // we derive principal from the total using:
+            // principal = amount * MAX_FEE_RATE / (MAX_FEE_RATE + feeRate)
+            uint256 principal = (amount * MAX_FEE_RATE) / (MAX_FEE_RATE + feeRate);
+            feeAmount = amount - principal;
             if (feeAmount > 0) {
                 if (!IERC20(tokenAddr).transfer(feeRecipient, feeAmount)) revert TransferFailed();
             }

@@ -832,25 +832,26 @@ describe("HTLC", function () {
       const { htlc, htlcAddress, testTokenAddress, testToken, alice, bob, preImage, hashValue, unlockTime } = await loadFixture(
         deployHTLCFixture
       );
-      const lockedAmount = 1000n;
+      const totalLockedAmount = 1010n; // 1000 principal + 10 fee (1%)
       const feeRate = 100n; // 1%
-      const expectedFee = (lockedAmount * feeRate) / 1000n; // 100 tokens (1% with MAX_FEE_RATE = 1000)
-      const expectedReceiverAmount = lockedAmount - expectedFee;
+      const expectedPrincipal = (totalLockedAmount * 10000n) / (10000n + feeRate);
+      const expectedFee = totalLockedAmount - expectedPrincipal;
+      const expectedReceiverAmount = expectedPrincipal;
       
       // Ensure sufficient allowance and balance
-      await (testToken as any).connect(alice).mint(lockedAmount);
-      await testToken.connect(alice).approve(htlcAddress, lockedAmount);
+      await (testToken as any).connect(alice).mint(totalLockedAmount);
+      await testToken.connect(alice).approve(htlcAddress, totalLockedAmount);
       
       // Set fee rate and recipient
       await htlc.connect(alice).setFeeRate(feeRate);
       await htlc.connect(alice).setFeeRecipient(alice.address);
       
-      await htlc.connect(alice).lock(hashValue, unlockTime, lockedAmount, testTokenAddress, bob.address);
+      await htlc.connect(alice).lock(hashValue, unlockTime, totalLockedAmount, testTokenAddress, bob.address);
       
       await expect(htlc.connect(bob).claim(preImage, alice.address)).to.changeTokenBalances(
         testToken,
         [bob, alice, htlc],
-        [expectedReceiverAmount, expectedFee, -lockedAmount]
+        [expectedReceiverAmount, expectedFee, -totalLockedAmount]
       );
     });
 
@@ -858,25 +859,26 @@ describe("HTLC", function () {
       const { htlc, htlcAddress, testTokenAddress, testToken, alice, bob, preImage, hashValue, unlockTime } = await loadFixture(
         deployHTLCFixture
       );
-      const lockedAmount = 10000n;
+      const totalLockedAmount = 10050n; // 10000 principal + 50 fee (0.5%)
       const feeRate = 50n; // 0.5%
-      const expectedFee = (lockedAmount * feeRate) / 1000n; // 500 tokens (0.5% with MAX_FEE_RATE = 1000)
-      const expectedReceiverAmount = lockedAmount - expectedFee;
+      const expectedPrincipal = (totalLockedAmount * 10000n) / (10000n + feeRate);
+      const expectedFee = totalLockedAmount - expectedPrincipal;
+      const expectedReceiverAmount = expectedPrincipal;
       
       // Ensure sufficient allowance and balance
-      await (testToken as any).connect(alice).mint(lockedAmount);
-      await testToken.connect(alice).approve(htlcAddress, lockedAmount);
+      await (testToken as any).connect(alice).mint(totalLockedAmount);
+      await testToken.connect(alice).approve(htlcAddress, totalLockedAmount);
       
       // Set fee rate and recipient
       await htlc.connect(alice).setFeeRate(feeRate);
       await htlc.connect(alice).setFeeRecipient(alice.address);
       
-      await htlc.connect(alice).lock(hashValue, unlockTime, lockedAmount, testTokenAddress, bob.address);
+      await htlc.connect(alice).lock(hashValue, unlockTime, totalLockedAmount, testTokenAddress, bob.address);
       
       await expect(htlc.connect(bob).claim(preImage, alice.address)).to.changeTokenBalances(
         testToken,
         [bob, alice, htlc],
-        [expectedReceiverAmount, expectedFee, -lockedAmount]
+        [expectedReceiverAmount, expectedFee, -totalLockedAmount]
       );
     });
 
@@ -885,25 +887,26 @@ describe("HTLC", function () {
         deployHTLCFixture
       );
       const [charlie] = await ethers.getSigners();
-      const lockedAmount = 1000n;
+      const totalLockedAmount = 1010n; // 1000 principal + 10 fee (1%)
       const feeRate = 100n; // 1% with MAX_FEE_RATE = 1000
-      const expectedFee = (lockedAmount * feeRate) / 1000n; // 100 tokens
-      const expectedReceiverAmount = lockedAmount - expectedFee; // 900
+      const expectedPrincipal = (totalLockedAmount * 10000n) / (10000n + feeRate);
+      const expectedFee = totalLockedAmount - expectedPrincipal;
+      const expectedReceiverAmount = expectedPrincipal;
       
       // Ensure sufficient allowance and balance
-      await (testToken as any).connect(alice).mint(lockedAmount);
-      await testToken.connect(alice).approve(htlcAddress, lockedAmount);
+      await (testToken as any).connect(alice).mint(totalLockedAmount);
+      await testToken.connect(alice).approve(htlcAddress, totalLockedAmount);
       
       // Set fee rate and recipient to charlie
       await htlc.connect(alice).setFeeRate(feeRate);
       await htlc.connect(alice).setFeeRecipient(charlie.address);
       
-      await htlc.connect(alice).lock(hashValue, unlockTime, lockedAmount, testTokenAddress, bob.address);
+      await htlc.connect(alice).lock(hashValue, unlockTime, totalLockedAmount, testTokenAddress, bob.address);
       
       await expect(htlc.connect(bob).claim(preImage, alice.address)).to.changeTokenBalances(
         testToken,
         [bob, charlie, htlc],
-        [expectedReceiverAmount, expectedFee, -lockedAmount]
+        [expectedReceiverAmount, expectedFee, -totalLockedAmount]
       );
     });
 
@@ -911,26 +914,26 @@ describe("HTLC", function () {
       const { htlc, htlcAddress, testTokenAddress, testToken, alice, bob, preImage, hashValue, unlockTime } = await loadFixture(
         deployHTLCFixture
       );
-      const lockedAmount = 333n; // Amount that might cause rounding issues
+      const totalLockedAmount = 333n; // Amount that might cause rounding issues
       const feeRate = 100n; // 1%
-      // 333 * 100 / 1000 = 33.3, which should round down to 33
-      const expectedFee = (lockedAmount * feeRate) / 1000n; // 33 tokens (rounded down)
-      const expectedReceiverAmount = lockedAmount - expectedFee; // 300 tokens
+      const expectedPrincipal = (totalLockedAmount * 10000n) / (10000n + feeRate);
+      const expectedFee = totalLockedAmount - expectedPrincipal; // rounding down
+      const expectedReceiverAmount = expectedPrincipal;
       
       // Ensure sufficient allowance and balance
-      await (testToken as any).connect(alice).mint(lockedAmount);
-      await testToken.connect(alice).approve(htlcAddress, lockedAmount);
+      await (testToken as any).connect(alice).mint(totalLockedAmount);
+      await testToken.connect(alice).approve(htlcAddress, totalLockedAmount);
       
       // Set fee rate and recipient
       await htlc.connect(alice).setFeeRate(feeRate);
       await htlc.connect(alice).setFeeRecipient(alice.address);
       
-      await htlc.connect(alice).lock(hashValue, unlockTime, lockedAmount, testTokenAddress, bob.address);
+      await htlc.connect(alice).lock(hashValue, unlockTime, totalLockedAmount, testTokenAddress, bob.address);
       
       await expect(htlc.connect(bob).claim(preImage, alice.address)).to.changeTokenBalances(
         testToken,
         [bob, alice, htlc],
-        [expectedReceiverAmount, expectedFee, -lockedAmount]
+        [expectedReceiverAmount, expectedFee, -totalLockedAmount]
       );
     });
 
@@ -960,20 +963,21 @@ describe("HTLC", function () {
       const { htlc, htlcAddress, testTokenAddress, testToken, alice, bob, preImage, hashValue, unlockTime } = await loadFixture(
         deployHTLCFixture
       );
-      const lockedAmount = 1000n;
+      const totalLockedAmount = 1010n; // 1000 principal + 10 fee
       const feeRate = 100n; // 1% with MAX_FEE_RATE = 1000
-      const expectedFee = (lockedAmount * feeRate) / 1000n;
-      const expectedReceiverAmount = lockedAmount - expectedFee;
+      const expectedPrincipal = (totalLockedAmount * 10000n) / (10000n + feeRate);
+      const expectedFee = totalLockedAmount - expectedPrincipal;
+      const expectedReceiverAmount = expectedPrincipal;
       
       // Ensure sufficient allowance and balance
-      await (testToken as any).connect(alice).mint(lockedAmount);
-      await testToken.connect(alice).approve(htlcAddress, lockedAmount);
+      await (testToken as any).connect(alice).mint(totalLockedAmount);
+      await testToken.connect(alice).approve(htlcAddress, totalLockedAmount);
       
       // Set fee rate and recipient
       await htlc.connect(alice).setFeeRate(feeRate);
       await htlc.connect(alice).setFeeRecipient(alice.address);
       
-      await htlc.connect(alice).lock(hashValue, unlockTime, lockedAmount, testTokenAddress, bob.address);
+      await htlc.connect(alice).lock(hashValue, unlockTime, totalLockedAmount, testTokenAddress, bob.address);
       
       // Event should still show the full locked amount
       await expect(htlc.connect(bob).claim(preImage, alice.address))
@@ -1003,36 +1007,38 @@ describe("HTLC", function () {
       // Create two locks
       const preImage1 = "0xaaaaaa";
       const hashValue1 = sha256(preImage1);
-      const lockedAmount1 = 1000n;
-      const expectedFee1 = (lockedAmount1 * feeRate) / 1000n;
-      const expectedReceiverAmount1 = lockedAmount1 - expectedFee1;
+      const totalLockedAmount1 = 1010n; // 1000 principal + 10 fee
+      const expectedPrincipal1 = (totalLockedAmount1 * 10000n) / (10000n + feeRate);
+      const expectedFee1 = totalLockedAmount1 - expectedPrincipal1;
+      const expectedReceiverAmount1 = expectedPrincipal1;
       
       const preImage2 = "0xbbbbbb";
       const hashValue2 = sha256(preImage2);
-      const lockedAmount2 = 2000n;
-      const expectedFee2 = (lockedAmount2 * feeRate) / 1000n;
-      const expectedReceiverAmount2 = lockedAmount2 - expectedFee2;
+      const totalLockedAmount2 = 2020n; // 2000 principal + 20 fee
+      const expectedPrincipal2 = (totalLockedAmount2 * 10000n) / (10000n + feeRate);
+      const expectedFee2 = totalLockedAmount2 - expectedPrincipal2;
+      const expectedReceiverAmount2 = expectedPrincipal2;
       
       // Ensure sufficient allowance and balance
-      const totalAmount = lockedAmount1 + lockedAmount2;
+      const totalAmount = totalLockedAmount1 + totalLockedAmount2;
       await (testToken as any).connect(alice).mint(totalAmount);
       await testToken.connect(alice).approve(htlcAddress, totalAmount);
       
-      await htlc.connect(alice).lock(hashValue1, unlockTime, lockedAmount1, testTokenAddress, bob.address);
-      await htlc.connect(alice).lock(hashValue2, unlockTime, lockedAmount2, testTokenAddress, bob.address);
+      await htlc.connect(alice).lock(hashValue1, unlockTime, totalLockedAmount1, testTokenAddress, bob.address);
+      await htlc.connect(alice).lock(hashValue2, unlockTime, totalLockedAmount2, testTokenAddress, bob.address);
       
       // Claim first lock
       await expect(htlc.connect(bob).claim(preImage1, alice.address)).to.changeTokenBalances(
         testToken,
         [bob, alice, htlc],
-        [expectedReceiverAmount1, expectedFee1, -lockedAmount1]
+        [expectedReceiverAmount1, expectedFee1, -totalLockedAmount1]
       );
       
       // Claim second lock
       await expect(htlc.connect(bob).claim(preImage2, alice.address)).to.changeTokenBalances(
         testToken,
         [bob, alice, htlc],
-        [expectedReceiverAmount2, expectedFee2, -lockedAmount2]
+        [expectedReceiverAmount2, expectedFee2, -totalLockedAmount2]
       );
     });
   });
