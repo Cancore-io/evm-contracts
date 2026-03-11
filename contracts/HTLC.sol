@@ -29,6 +29,7 @@ contract HTLC is Ownable, IHTLC {
     error TransferFailed();
     error SenderEqualsReceiver();
     error InvalidFeeRate();
+    error InvalidUnlockTime();
     error Permit2NotSet();
     error InvalidPermit2Parameters();
     error InvalidPermitParameters();
@@ -247,6 +248,7 @@ contract HTLC is Ownable, IHTLC {
         address tokenAddress,
         address receiverAddress
     ) external {
+        if (unlockTime <= block.timestamp) revert InvalidUnlockTime();
         if (tokenAddress == address(0)) revert ZeroAddress();
         if (receiverAddress == address(0)) revert ZeroAddress();
         if (receiverAddress == msg.sender) revert SenderEqualsReceiver();
@@ -282,6 +284,7 @@ contract HTLC is Ownable, IHTLC {
         IPermit2.SignatureTransferDetails calldata transferDetails,
         bytes calldata signature
     ) external {
+        if (unlockTime <= block.timestamp) revert InvalidUnlockTime();
         if (permit2 == address(0)) revert Permit2NotSet();
         if (tokenAddress == address(0)) revert ZeroAddress();
         if (receiverAddress == address(0)) revert ZeroAddress();
@@ -332,6 +335,7 @@ contract HTLC is Ownable, IHTLC {
         bytes32 r,
         bytes32 s
     ) external {
+        if (unlockTime <= block.timestamp) revert InvalidUnlockTime();
         if (tokenAddress == address(0)) revert ZeroAddress();
         if (receiverAddress == address(0)) revert ZeroAddress();
         if (receiverAddress == msg.sender) revert SenderEqualsReceiver();
