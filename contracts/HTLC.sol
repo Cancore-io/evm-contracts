@@ -2,9 +2,10 @@
 pragma solidity 0.8.33;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Permit.sol";
 import "./interfaces/IPermit2.sol";
-import "./interfaces/IERC20Permit.sol";
 import "./interfaces/IHTLC.sol";
 
 /**
@@ -14,9 +15,12 @@ import "./interfaces/IHTLC.sol";
  * @dev This contract allows users to lock ERC20 tokens with a hash commitment and time-based unlock mechanism.
  *      The receiver can claim tokens by revealing the pre-image before unlock time,
  *      or the sender can retake tokens after the unlock time has elapsed.
+ *      The contract is designed for standard ERC20 tokens without fee-on-transfer or rebasing mechanics.
+ *      Locks with fee-on-transfer or rebasing tokens will revert when the incoming amount does not match `amount`.
  */
 contract HTLC is Ownable, IHTLC {
-    
+    using SafeERC20 for IERC20;
+
     error ZeroAddress();
     error ZeroAmount();
     error InvalidPreImage();
@@ -209,12 +213,12 @@ contract HTLC is Ownable, IHTLC {
             uint256 principal = (amount * MAX_FEE_RATE) / (MAX_FEE_RATE + feeRate);
             feeAmount = amount - principal;
             if (feeAmount > 0) {
-                if (!IERC20(tokenAddr).transfer(feeRecipient, feeAmount)) revert TransferFailed();
+                IERC20(tokenAddr).safeTransfer(feeRecipient, feeAmount);
             }
         }
         
         uint256 receiverAmount = amount - feeAmount;
-        if (!IERC20(tokenAddr).transfer(receiverAddr, receiverAmount)) revert TransferFailed();
+        IERC20(tokenAddr).safeTransfer(receiverAddr, receiverAmount);
 
         emit Claimed({
             preImage: preImage,
@@ -236,7 +240,9 @@ contract HTLC is Ownable, IHTLC {
      * @param tokenAddress Address of the ERC20 token contract
      * @param receiverAddress Address of the user who can claim with the pre-image
      * @dev The sender must have approved this contract to spend at least `amount` tokens
-     * @dev unlockTime must be in the future (checked implicitly by claim/retake logic)
+     * @dev unlockTime must be in the future
+     * @dev The contract assumes standard ERC20 tokens without fee-on-transfer or rebasing.
+     *      The function reverts if the post-transfer balance increase does not equal `amount`.
      * @dev Prevents duplicate locks with same hashValue and sender
      * @dev Uses SHA256 for hash computation (to match DAML contracts which use SHA256)
      * @custom:security Reentrancy protection: state is set after external call
@@ -255,7 +261,10 @@ contract HTLC is Ownable, IHTLC {
         if (amount == 0) revert ZeroAmount();
 
         IERC20 erc20 = IERC20(tokenAddress);
-        if (!erc20.transferFrom(msg.sender, address(this), amount)) revert TransferFailed();
+        uint256 balanceBefore = erc20.balanceOf(address(this));
+        erc20.safeTransferFrom(msg.sender, address(this), amount);
+        uint256 balanceAfter = erc20.balanceOf(address(this));
+        if (balanceAfter != balanceBefore + amount) revert TransferFailed();
 
         _lock(hashValue, unlockTime, amount, tokenAddress, msg.sender, receiverAddress);
     }
@@ -273,6 +282,8 @@ contract HTLC is Ownable, IHTLC {
      * @dev Uses Uniswap Permit2 (Signature Transfer) to pull tokens from msg.sender without prior ERC20 approve.
      * @dev Follows Checks-Effects-Interactions: state is updated after successful external call to Permit2.
      * @custom:security The permit must be specifically bound to this contract and the expected amount.
+     * @dev The contract assumes standard ERC20 tokens without fee-on-transfer or rebasing.
+     *      The function reverts if the post-transfer balance increase does not equal `amount`.
      */
     function lockWithPermit2(
         bytes32 hashValue,
@@ -298,12 +309,18 @@ contract HTLC is Ownable, IHTLC {
         
         if (block.timestamp > permit.deadline) revert InvalidPermit2Parameters();
 
+        IERC20 erc20 = IERC20(tokenAddress);
+        uint256 balanceBefore = erc20.balanceOf(address(this));
+
         IPermit2(permit2).permitTransferFrom(
             permit,
             transferDetails,
             msg.sender,
             signature
         );
+
+        uint256 balanceAfter = erc20.balanceOf(address(this));
+        if (balanceAfter != balanceBefore + amount) revert TransferFailed();
 
         _lock(hashValue, unlockTime, amount, tokenAddress, msg.sender, receiverAddress);
     }
@@ -323,6 +340,8 @@ contract HTLC is Ownable, IHTLC {
      * @dev The token must support EIP-2612 permit functionality
      * @dev Follows Checks-Effects-Interactions: state is updated after successful token transfer
      * @custom:security The permit must be specifically bound to this contract and the expected amount
+     * @dev The contract assumes standard ERC20 tokens without fee-on-transfer or rebasing.
+     *      The function reverts if the post-transfer balance increase does not equal `amount`.
      */
     function lockWithPermit(
         bytes32 hashValue,
@@ -354,7 +373,10 @@ contract HTLC is Ownable, IHTLC {
         );
 
         IERC20 erc20 = IERC20(tokenAddress);
-        if (!erc20.transferFrom(msg.sender, address(this), amount)) revert TransferFailed();
+        uint256 balanceBefore = erc20.balanceOf(address(this));
+        erc20.safeTransferFrom(msg.sender, address(this), amount);
+        uint256 balanceAfter = erc20.balanceOf(address(this));
+        if (balanceAfter != balanceBefore + amount) revert TransferFailed();
 
         _lock(hashValue, unlockTime, amount, tokenAddress, msg.sender, receiverAddress);
     }
@@ -383,7 +405,7 @@ contract HTLC is Ownable, IHTLC {
         delete locks[lockKey];
         
         IERC20 erc20 = IERC20(tokenAddr);
-        if (!erc20.transfer(senderAddress, amount)) revert TransferFailed();
+        erc20.safeTransfer(senderAddress, amount);
 
         emit Retaken({
             hashValue: hashValue,

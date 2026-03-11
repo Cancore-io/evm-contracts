@@ -54,43 +54,43 @@ describe("HTLC", function () {
 
   describe("Locking", function () {
     it("Should revert with zero value", async function () {
-      const { htlc, testTokenAddress, alice, bob, hashValue } = await loadFixture(deployHTLCFixture);
+      const { htlc, testTokenAddress, alice, bob, hashValue, unlockTime } = await loadFixture(deployHTLCFixture);
 
-      await expect(htlc.connect(alice).lock(hashValue, 1, 0, testTokenAddress, bob.address))
+      await expect(htlc.connect(alice).lock(hashValue, unlockTime, 0, testTokenAddress, bob.address))
         .to.be.revertedWithCustomError(htlc, "ZeroAmount");
     });
 
     it("Should revert if locker does not have enough tokens", async function () {
-      const { htlc, testTokenAddress, alice, bob, hashValue } = await loadFixture(
+      const { htlc, testTokenAddress, alice, bob, hashValue, unlockTime } = await loadFixture(
         deployHTLCFixture
       );
 
-      await expect(htlc.connect(bob).lock(hashValue, 1, 1, testTokenAddress, alice.address)).to.be.revertedWith(
+      await expect(htlc.connect(bob).lock(hashValue, unlockTime, 1, testTokenAddress, alice.address)).to.be.revertedWith(
         "ERC20: transfer amount exceeds balance"
       );
     });
 
     it("Should revert if insufficient allowance", async function () {
-      const { htlc, htlcAddress, testToken, testTokenAddress, alice, bob, hashValue } = await loadFixture(
+      const { htlc, htlcAddress, testToken, testTokenAddress, alice, bob, hashValue, unlockTime } = await loadFixture(
         deployHTLCFixture
       );
 
       // Revoke approval
       await testToken.connect(alice).approve(htlcAddress, 0);
 
-      await expect(htlc.connect(alice).lock(hashValue, 1, 1, testTokenAddress, bob.address)).to.be.revertedWith(
+      await expect(htlc.connect(alice).lock(hashValue, unlockTime, 1, testTokenAddress, bob.address)).to.be.revertedWith(
         "ERC20: insufficient allowance"
       );
     });
 
     it("Should not allowing locking twice with the same hash", async function () {
-      const { htlc, testTokenAddress, alice, bob, hashValue } = await loadFixture(
+      const { htlc, testTokenAddress, alice, bob, hashValue, unlockTime } = await loadFixture(
         deployHTLCFixture
       );
 
-      await htlc.connect(alice).lock(hashValue, 1, 1, testTokenAddress, bob.address);
+      await htlc.connect(alice).lock(hashValue, unlockTime, 1, testTokenAddress, bob.address);
 
-      await expect(htlc.connect(alice).lock(hashValue, 1, 1, testTokenAddress, bob.address))
+      await expect(htlc.connect(alice).lock(hashValue, unlockTime, 1, testTokenAddress, bob.address))
         .to.be.revertedWithCustomError(htlc, "LockAlreadyExists");
     });
 
