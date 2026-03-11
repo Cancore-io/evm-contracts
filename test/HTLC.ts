@@ -54,43 +54,43 @@ describe("HTLC", function () {
 
   describe("Locking", function () {
     it("Should revert with zero value", async function () {
-      const { htlc, testTokenAddress, alice, bob, hashValue } = await loadFixture(deployHTLCFixture);
+      const { htlc, testTokenAddress, alice, bob, hashValue, unlockTime } = await loadFixture(deployHTLCFixture);
 
-      await expect(htlc.connect(alice).lock(hashValue, 1, 0, testTokenAddress, bob.address))
+      await expect(htlc.connect(alice).lock(hashValue, unlockTime, 0, testTokenAddress, bob.address))
         .to.be.revertedWithCustomError(htlc, "ZeroAmount");
     });
 
     it("Should revert if locker does not have enough tokens", async function () {
-      const { htlc, testTokenAddress, alice, bob, hashValue } = await loadFixture(
+      const { htlc, testTokenAddress, alice, bob, hashValue, unlockTime } = await loadFixture(
         deployHTLCFixture
       );
 
-      await expect(htlc.connect(bob).lock(hashValue, 1, 1, testTokenAddress, alice.address)).to.be.revertedWith(
+      await expect(htlc.connect(bob).lock(hashValue, unlockTime, 1, testTokenAddress, alice.address)).to.be.revertedWith(
         "ERC20: transfer amount exceeds balance"
       );
     });
 
     it("Should revert if insufficient allowance", async function () {
-      const { htlc, htlcAddress, testToken, testTokenAddress, alice, bob, hashValue } = await loadFixture(
+      const { htlc, htlcAddress, testToken, testTokenAddress, alice, bob, hashValue, unlockTime } = await loadFixture(
         deployHTLCFixture
       );
 
       // Revoke approval
       await testToken.connect(alice).approve(htlcAddress, 0);
 
-      await expect(htlc.connect(alice).lock(hashValue, 1, 1, testTokenAddress, bob.address)).to.be.revertedWith(
+      await expect(htlc.connect(alice).lock(hashValue, unlockTime, 1, testTokenAddress, bob.address)).to.be.revertedWith(
         "ERC20: insufficient allowance"
       );
     });
 
     it("Should not allowing locking twice with the same hash", async function () {
-      const { htlc, testTokenAddress, alice, bob, hashValue } = await loadFixture(
+      const { htlc, testTokenAddress, alice, bob, hashValue, unlockTime } = await loadFixture(
         deployHTLCFixture
       );
 
-      await htlc.connect(alice).lock(hashValue, 1, 1, testTokenAddress, bob.address);
+      await htlc.connect(alice).lock(hashValue, unlockTime, 1, testTokenAddress, bob.address);
 
-      await expect(htlc.connect(alice).lock(hashValue, 1, 1, testTokenAddress, bob.address))
+      await expect(htlc.connect(alice).lock(hashValue, unlockTime, 1, testTokenAddress, bob.address))
         .to.be.revertedWithCustomError(htlc, "LockAlreadyExists");
     });
 
@@ -1368,14 +1368,92 @@ describe("HTLC", function () {
       ).to.be.revertedWithCustomError(htlc, "InvalidPermitParameters");
     });
 
-    it("Should revert if token does not support permit", async function () {
-      const { htlc, testTokenAddress, alice, bob, hashValue, unlockTime } = await loadFixture(deployHTLCFixture);
+    it("Should tolerate front-run permit by using existing allowance", async function () {
+      const { htlc, htlcAddress, testTokenWithPermit, testTokenWithPermitAddress, alice, bob, hashValue, unlockTime } =
+        await loadFixture(deployHTLCWithPermitTokenFixture);
+
+      const lockedAmount = 10n;
+      await (testTokenWithPermit as any).connect(alice).mint(lockedAmount);
+
+      const latestTime = await time.latest();
+      const deadline = BigInt(latestTime) + 3600n;
+
+      const domain = {
+        name: await testTokenWithPermit.name(),
+        version: "1",
+        chainId: (await ethers.provider.getNetwork()).chainId,
+        verifyingContract: await testTokenWithPermit.getAddress(),
+      };
+
+      const types = {
+        Permit: [
+          { name: "owner", type: "address" },
+          { name: "spender", type: "address" },
+          { name: "value", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+        ],
+      };
+
+      const nonce = await testTokenWithPermit.nonces(alice.address);
+      const value = {
+        owner: alice.address,
+        spender: htlcAddress,
+        value: lockedAmount,
+        nonce: nonce,
+        deadline: deadline,
+      };
+
+      const signature = await alice.signTypedData(domain, types, value);
+      const sig = ethers.Signature.from(signature);
+
+      // Front-run: кто-то заранее вызывает permit напрямую на токене
+      await testTokenWithPermit.permit(
+        alice.address,
+        htlcAddress,
+        lockedAmount,
+        deadline,
+        sig.v,
+        sig.r,
+        sig.s
+      );
+
+      // Теперь вызываем lockWithPermit с той же сигнатурой.
+      // Внутренний permit упадёт (nonce уже изменился), но контракт
+      // должен использовать уже установленный allowance и завершить лок.
+      await expect(
+        htlc
+          .connect(alice)
+          .lockWithPermit(
+            hashValue,
+            unlockTime,
+            lockedAmount,
+            testTokenWithPermitAddress,
+            bob.address,
+            deadline,
+            sig.v,
+            sig.r,
+            sig.s
+          )
+      )
+        .to.emit(htlc, "Locked")
+        .withArgs(hashValue, unlockTime, lockedAmount, testTokenWithPermitAddress, alice.address, bob.address);
+
+      const lock = await htlc.getLock(hashValue, alice.address);
+      expect(lock.amount).to.equal(lockedAmount);
+      expect(lock.tokenAddress).to.equal(testTokenWithPermitAddress);
+    });
+
+    it("Should fall back to existing allowance when token does not support permit", async function () {
+      const { htlc, testToken, testTokenAddress, alice, bob, hashValue, unlockTime } = await loadFixture(
+        deployHTLCFixture
+      );
 
       const lockedAmount = 10n;
       const latestTime = await time.latest();
       const deadline = BigInt(latestTime) + 3600n;
 
-      // Try to use regular TestToken (without permit support)
+      // Use regular TestToken (without permit support) but with existing allowance
       await expect(
         htlc
           .connect(alice)
@@ -1390,7 +1468,11 @@ describe("HTLC", function () {
             ethers.ZeroHash,
             ethers.ZeroHash
           )
-      ).to.be.reverted; // Should revert because TestToken doesn't have permit function
+      ).to.changeTokenBalances(
+        testToken,
+        [alice, htlc],
+        [-lockedAmount, lockedAmount]
+      );
     });
   });
 });
