@@ -360,9 +360,10 @@ contract HTLC is Ownable, IHTLC {
         if (receiverAddress == msg.sender) revert SenderEqualsReceiver();
         if (amount == 0) revert ZeroAmount();
 
-        if (block.timestamp > deadline) revert InvalidPermitParameters();
+        IERC20 erc20 = IERC20(tokenAddress);
+        uint256 balanceBefore = erc20.balanceOf(address(this));
 
-        IERC20Permit(tokenAddress).permit(
+        try IERC20Permit(tokenAddress).permit(
             msg.sender,
             address(this),
             amount,
@@ -370,10 +371,12 @@ contract HTLC is Ownable, IHTLC {
             v,
             r,
             s
-        );
+        ) {
+            // permit succeeded, allowance updated
+        } catch {
+            if (erc20.allowance(msg.sender, address(this)) < amount) revert InvalidPermitParameters();
+        }
 
-        IERC20 erc20 = IERC20(tokenAddress);
-        uint256 balanceBefore = erc20.balanceOf(address(this));
         erc20.safeTransferFrom(msg.sender, address(this), amount);
         uint256 balanceAfter = erc20.balanceOf(address(this));
         if (balanceAfter != balanceBefore + amount) revert TransferFailed();
