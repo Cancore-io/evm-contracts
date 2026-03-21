@@ -7,6 +7,7 @@ dotenv.config();
 import { setFeeRecipientTask } from "./scripts/tasks/setFeeRecipient";
 import { setFeeRateTask } from "./scripts/tasks/setFeeRate";
 import { setPermit2Task } from "./scripts/tasks/setPermit2";
+import { deployMultiBalanceCheckerTask } from "./scripts/tasks/deployMultiBalanceChecker";
 
 const PRIVATE_KEY = process.env.PRIVATE_KEY || "0x0000000000000000000000000000000000000000000000000000000000000000";
 
@@ -24,6 +25,9 @@ task("setPermit2", "Sets the Permit2 contract address on the HTLC contract")
   .addParam("htlc", "HTLC contract address")
   .addParam("permit2", "New Permit2 contract address")
   .setAction(setPermit2Task);
+
+task("deployMultiBalanceChecker", "Deploys MultiBalanceChecker utility contract (batch ERC20/native balances)")
+  .setAction(deployMultiBalanceCheckerTask);
 
 const config: HardhatUserConfig = {
   solidity: {

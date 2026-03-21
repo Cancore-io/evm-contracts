@@ -107,6 +107,12 @@ Deploy test tokens:
 npm run deploy:tokens
 ```
 
+Deploy **MultiBalanceChecker** (Hardhat task, same pattern as `setFeeRate` / `setPermit2`):
+```bash
+npx hardhat deployMultiBalanceChecker
+npx hardhat deployMultiBalanceChecker --network sepolia
+```
+
 ### Supported Networks
 
 - **Sepolia** - Ethereum testnet
@@ -159,6 +165,7 @@ evm-htlc/
 │   └── TestToken.sol  # Test token for testing
 ├── scripts/            # Deployment and utility scripts
 │   ├── deploy/        # Deployment scripts
+│   ├── tasks/         # Hardhat tasks (deploy utilities, HTLC admin)
 │   └── tools/         # Utility scripts (Slither, etc.)
 ├── test/              # Test files
 ├── docs/              # Documentation
