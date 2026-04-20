@@ -41,6 +41,14 @@ Contract: `contracts/HTLC.sol`
 | BNB Testnet      | 97       | [`0x36D7BEBDB5f93b7b926D621E412132dF89628810`](https://testnet.bscscan.com/address/0x36D7BEBDB5f93b7b926D621E412132dF89628810) |          | Deployment block: `92435953` |
 | Arbitrum Sepolia | 421614   | [`0x07a6ccF1f0113e2329Bb2460b28eC0d169f5080E`](https://sepolia.arbiscan.io/address/0x07a6ccF1f0113e2329Bb2460b28eC0d169f5080E) |          | Deployment block: `245190705` |
 
+### Devnet
+
+| Network          | Chain ID | HTLC address | Verified | Notes / deployment |
+|------------------|----------|--------------|----------|--------------------|
+| Sepolia          | 11155111 | [`0xc74469B26206A7b3Aee2781EC21F9F47a1552DD6`](https://sepolia.etherscan.io/address/0xc74469B26206A7b3Aee2781EC21F9F47a1552DD6) |          | Deployment block: `10469876` |
+| BNB Testnet      | 97       | [`0xC649d578FD0122E2Ce3Bcf6b89E3ef2564d1a30D`](https://testnet.bscscan.com/address/0xC649d578FD0122E2Ce3Bcf6b89E3ef2564d1a30D) |          | Deployment block: `96439032` |
+| Arbitrum Sepolia | 421614   | [`0xE23A046Df3542C4C548162adab4397956b136031`](https://sepolia.arbiscan.io/address/0xE23A046Df3542C4C548162adab4397956b136031) |          | Deployment block: `251260393` |
+
 ---
 
 ## MultiBalanceChecker
