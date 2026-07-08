@@ -19,6 +19,9 @@ coverage.json
 reports/*.txt
 !reports/.gitkeep
 
+# Echidna fuzzing corpus (nightly, see .github/workflows/echidna.yml)
+reports/echidna-corpus/
+
 # IDE
 .idea
 .vscode

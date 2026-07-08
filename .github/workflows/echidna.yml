@@ -1,0 +1,65 @@
+name: Echidna Invariants (nightly)
+
+# Non-blocking nightly property-based fuzzing of the HTLC invariant harness
+# (contracts/test/echidna/EchidnaHTLC.sol). Echidna is slow and stochastic, so
+# it runs on a schedule rather than per-push and never fails the pipeline — a
+# broken invariant surfaces as a failed run to triage, not a merge gate.
+#
+# NOTE: per-push / PR-gating wiring is deferred to the evm-toolchain ticket
+# (CAN-418). This workflow provides the runner via crytic/echidna-action.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  echidna:
+    name: HTLC property fuzzing
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile contracts
+        run: npm run compile
+
+      - name: Run Echidna (property mode)
+        id: echidna
+        uses: crytic/echidna-action@v2
+        continue-on-error: true
+        with:
+          files: .
+          contract: EchidnaHTLC
+          config: echidna.yaml
+          crytic-args: --hardhat-ignore-compile
+
+      - name: Upload Echidna corpus
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: echidna-corpus-${{ github.run_number }}
+          path: reports/echidna-corpus/
+          retention-days: 30
+
+      - name: Write job summary
+        if: always()
+        run: |
+          ICON=$([[ "${{ steps.echidna.outcome }}" == "success" ]] && echo "✅" || echo "⚠️")
+          {
+            echo "## ${ICON} Echidna Invariants"
+            echo ""
+            echo "Harness: \`EchidnaHTLC\` — INV-1/INV-2/INV-3/INV-5 on the EVM leg (see docs/rtm/invariants.md)."
+            echo "Non-blocking — a failing property is a triage item, not a merge gate."
+          } >> "$GITHUB_STEP_SUMMARY"

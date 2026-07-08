@@ -1,0 +1,13 @@
+# Echidna config for the HTLC invariant harness (contracts/test/echidna/EchidnaHTLC.sol).
+# Run: npm run fuzz:echidna
+# Property mode: every echidna_* view returning true must stay true across the
+# fuzzed call sequence. crytic-compile builds via the local Hardhat project.
+testMode: property
+testLimit: 50000
+seqLen: 100
+shrinkLimit: 5000
+corpusDir: reports/echidna-corpus
+# Allow the fuzzer to advance block.timestamp so both the pre-deadline claim
+# path and the post-deadline retake path (INV-3) are exercised.
+maxTimeDelay: 2592000 # 30 days, matches EchidnaHTLC.MAX_DURATION
+maxBlockDelay: 100000

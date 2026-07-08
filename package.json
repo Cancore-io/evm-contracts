@@ -6,6 +6,7 @@
     "clean": "hardhat clean",
     "slither:setup": "./scripts/tools/setup-slither.sh",
     "slither": "./scripts/slither-analysis.sh",
+    "fuzz:echidna": "echidna . --contract EchidnaHTLC --config echidna.yaml",
     "security": "npm run slither && npm test",
     "deploy:local": "hardhat run scripts/deploy/deployHTLC.ts",
     "deploy:sepolia": "hardhat run scripts/deploy/deployHTLC.ts --network sepolia",
