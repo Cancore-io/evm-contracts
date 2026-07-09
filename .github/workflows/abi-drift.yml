@@ -1,0 +1,45 @@
+name: ABI Drift
+
+# CAN-400 — the committed abi/ snapshot must match the compiled contracts, so a
+# Solidity change can't drift from the ABI the backend integrates against.
+# Non-blocking for now (report only).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  abi-drift:
+    name: ABI snapshot drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile contracts
+        run: npm run compile
+
+      - name: Check ABI drift
+        id: abi
+        continue-on-error: true
+        run: npm run abi:check
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## ABI drift (CAN-400) — non-blocking"
+            echo "outcome: ${{ steps.abi.outcome }}"
+            echo ""
+            echo "If failed: \`npm run abi:extract\`, review + commit \`abi/\`, update backend typechain."
+          } >> "$GITHUB_STEP_SUMMARY"
