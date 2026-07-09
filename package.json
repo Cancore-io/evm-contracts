@@ -10,7 +10,9 @@
     "security": "npm run slither && npm test",
     "deploy:local": "hardhat run scripts/deploy/deployHTLC.ts",
     "deploy:sepolia": "hardhat run scripts/deploy/deployHTLC.ts --network sepolia",
-    "deploy:tokens": "hardhat run scripts/deploy/deployTokens.ts"
+    "deploy:tokens": "hardhat run scripts/deploy/deployTokens.ts",
+    "abi:extract": "node scripts/abi/extract-abi.mjs",
+    "abi:check": "node scripts/abi/check-abi-drift.mjs"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
