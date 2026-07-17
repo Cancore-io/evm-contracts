@@ -16,12 +16,23 @@ const ROOT = join(HERE, '..', '..');
 
 execSync('node scripts/abi/extract-abi.mjs', { cwd: ROOT, stdio: 'inherit' });
 
-try {
-  execSync('git diff --exit-code -- abi/', { cwd: ROOT, stdio: 'inherit' });
-} catch {
+// `git diff` only sees tracked files, so a brand-new contract's ABI would land
+// as untracked and the gate would pass while the snapshot is missing it
+// entirely. `git status --porcelain` covers modified AND untracked.
+const dirty = execSync('git status --porcelain -- abi/', { cwd: ROOT, encoding: 'utf8' }).trim();
+
+if (dirty) {
+  console.error('\n✗ committed abi/ is out of sync with the compiled contracts:\n');
+  console.error(dirty);
+  const untracked = dirty
+    .split('\n')
+    .filter((l) => l.startsWith('??'))
+    .map((l) => l.slice(3));
+  if (untracked.length > 0) {
+    console.error(`\n  Never committed: ${untracked.join(', ')}`);
+  }
   console.error(
-    '\n✗ committed abi/ is stale — a contract ABI changed.\n' +
-      '  Run `npm run abi:extract`, review the diff, commit abi/, and update the\n' +
+    '\n  Run `npm run abi:extract`, review the diff, commit abi/, and update the\n' +
       '  backend typechain bindings that consume it.',
   );
   process.exit(1);

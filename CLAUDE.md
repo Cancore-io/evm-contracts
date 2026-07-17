@@ -23,7 +23,12 @@ npm run security               # slither + тесты
   - Ставится как `HTLC.feeRecipient` → держит только комиссии, не principal свопов
   - `redeem(FeeClaim, sig)` — pull-модель: партнёр редимит сам и платит газ, бэкенд транзакций не шлёт
   - Домен `CancoreFeeVault/1`, тип `FeeClaim(address token,address to,uint256 amount,uint256 nonce,uint256 deadline)` — должен совпадать с бэкендом byte-for-byte
-  - Защита от повтора: EIP-712 домен (сеть+vault) + одноразовый `usedNonces` + `deadline`; `setSigner(x,false)` — kill-switch на утёкший ключ
+  - Реплей ключуется на **EIP-712 digest** (`usedDigests`), не на голом nonce — два подписанта при ротации не гасят ваучеры друг друга. Сеттлмент off-chain — через `isRedeemed(voucher)`
+  - Отзыв подписанта **необратим** (`revokedSigners`): повторный grant запрещён, иначе утёкший ключ воскресил бы заранее подписанные ваучеры. Ротация: сначала grant нового, потом revoke старого
+  - `cancelVoucher(digest)` — точечно убить один ваучер, не трогая остальные
+  - Владение: `Ownable2Step`, `renounceOwnership` заблокирован (все рычаги owner-only — ownerless vault = вечная заморозка)
+
+**Модель доверия FeeVault:** owner (мультисиг) может `sweep` всю накопленную выручку и грантить подписантов. Principal свопов под угрозой НЕ находится — HTLC платит его только receiver'у или обратно sender'у, рескью-пути в vault нет. Владельца передавать мультисигу сразу после деплоя (`--owner` в задаче деплоя, обязателен на mainnet).
 - **MultiBalanceChecker.sol** — batch-запрос балансов ERC20/native для массива адресов
 - **TestToken.sol**, **TestTokenWithPermit.sol** — тестовые ERC20
 - **MockPermit2.sol** — мок для тестов
@@ -53,13 +58,32 @@ npx hardhat setFeeVaultSigner --vault <addr> --signer <addr> [--revoke] --networ
 ### Развёртывание FeeVault (порядок важен)
 
 ```bash
-npx hardhat deployFeeVault --network <net>                                  # 1. деплой
-npx hardhat setFeeRecipient --htlc <htlc> --recipient <vault> --network <net>  # 2. комиссии текут в vault
-npx hardhat setFeeVaultSigner --vault <vault> --signer <backendKey> --network <net>  # 3. без этого redeem невозможен
+# 1. деплой + номинация мультисига владельцем (--owner обязателен на mainnet)
+npx hardhat deployFeeVault --owner <multisig> --network <net>
+# 2. мультисиг вызывает acceptOwnership() на vault — до этого владелец = деплойный EOA
+# 3. грант подписанта (без него redeem невозможен)
+npx hardhat setFeeVaultSigner --vault <vault> --signer <backendKey> --network <net>
+# 4. направить комиссии в vault
+npx hardhat setFeeRecipient --htlc <htlc> --recipient <vault> --network <net>
 ```
 
 Затем на бэкенде: `<NET>_FEE_VAULT_ADDRESS=<vault>` и приватный ключ подписанта в Vault
 (`<NET>_FEE_VAULT_SIGNER_KEY`). Без этих двух рельс возврата выключен.
+
+### Runbook: инциденты FeeVault
+
+- **Утёк ключ подписанта** → `setFeeVaultSigner --revoke` (необратимо) или `pause()`. Оба
+  реактивны и **фронт-раннятся из mempool**: держатель ключа может опустошить vault, увидев
+  твою транзакцию. Экстренный revoke слать через приватный релей (Flashbots Protect).
+  Профилактика — регулярный `sweep` в казну, чтобы at-risk баланс был мал.
+- **Один ошибочный ваучер** → `cancelVoucher(digest)`, не трогая остальные (`hashVoucher(voucher)` даёт digest).
+- **Пауза и дедлайны:** ваучеры продолжают истекать во время паузы — истёкшие бэкенд обязан
+  перевыпустить после `unpause()`.
+- **Эмитент блэклистит адрес vault** (напр. Circle по USDC) — сломаются ВСЕ `claim` HTLC по
+  этому токену (`claim` переводит комиссию в vault до выплаты receiver'у), плюс заморозится
+  накопленный баланс. Реакция: немедленно `setFeeRate(0)` или переназначить `feeRecipient`.
+- **`sweep` ниже непогашенных обязательств** сделает redeem реверсящим до пополнения —
+  сверяться с outstanding liability бэкенда перед свипом.
 
 ## Стек
 

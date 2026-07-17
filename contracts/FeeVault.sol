@@ -3,7 +3,7 @@ pragma solidity 0.8.33;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
@@ -15,39 +15,50 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
  *         backend-signed EIP-712 vouchers.
  * @dev Set as `HTLC.feeRecipient`, so every HTLC claim forwards its fee here.
  *      The vault therefore holds ONLY fees — never a swap's locked principal —
- *      which is why a compromised voucher signer can never touch user funds.
+ *      which is why a compromised voucher signer, or {sweep}, can never touch
+ *      user funds: HTLC only ever pays principal to the receiver or back to the
+ *      sender, and has no rescue path into this contract.
  *
  *      Redemption is pull-based: the backend signs a `FeeClaim` off-chain and
  *      the partner submits `redeem` themselves (they pay the gas; the backend
  *      never broadcasts a transaction). The recipient is bound inside the
  *      signature, so a voucher may be relayed by anyone without being redirected.
  *
- *      Replay protection is threefold:
+ *      Replay protection is keyed on the full EIP-712 digest, not the bare
+ *      nonce, so two signers (e.g. mid-rotation) can never collide on a nonce
+ *      and burn each other's vouchers. Combined:
  *        - the EIP-712 domain binds a voucher to one chain and one vault,
- *        - `usedNonces` makes each voucher single-use,
- *        - `deadline` expires unredeemed vouchers.
- *      Revoking a signer via {setSigner} invalidates every voucher it ever
- *      signed — the kill-switch for a leaked key.
+ *        - `usedDigests` makes each distinct voucher single-use,
+ *        - `deadline` expires unredeemed vouchers,
+ *        - {setSigner} revocation is permanent — a revoked key can never be
+ *          re-granted, so its vouchers stay dead for good.
  *
  *      Designed for standard ERC20 tokens without fee-on-transfer or rebasing
  *      mechanics; with such tokens the recipient would receive less than the
  *      signed `amount`.
+ *
+ * @custom:security Ownership is 2-step and non-renounceable: every response
+ *      lever ({setSigner}, {pause}, {cancelVoucher}, {sweep}) is owner-only, so
+ *      a typo'd or renounced owner would permanently disable the kill-switch.
+ *      Transfer ownership to a multisig immediately after deployment.
  */
-contract FeeVault is Ownable, Pausable, EIP712 {
+contract FeeVault is Ownable2Step, Pausable, EIP712 {
     using SafeERC20 for IERC20;
 
     error ZeroAddress();
     error ZeroAmount();
     error VoucherExpired();
-    error NonceAlreadyUsed();
+    error VoucherAlreadyUsed();
     error InvalidSigner();
+    error SignerPermanentlyRevoked();
+    error RenounceDisabled();
 
     /**
      * @notice A backend-signed authorization to pull a fee refund from this vault
      * @param token ERC20 the refund is paid in
      * @param to Recipient of the refund (chosen by the partner, bound by the signature)
      * @param amount Refund amount in token base units
-     * @param nonce Single-use 256-bit value; a voucher can never be redeemed twice
+     * @param nonce Uniquifier for the voucher; replay is keyed on the whole digest
      * @param deadline Unix timestamp after which the voucher is no longer redeemable
      */
     struct FeeClaim {
@@ -67,9 +78,12 @@ contract FeeVault is Ownable, Pausable, EIP712 {
         keccak256("FeeClaim(address token,address to,uint256 amount,uint256 nonce,uint256 deadline)");
 
     /**
-     * @notice Nonces already redeemed. The backend polls this to settle a voucher.
+     * @notice Voucher digests already consumed — redeemed, or cancelled by the owner
+     * @dev Keyed on the EIP-712 digest so distinct vouchers are independent even
+     *      if they happen to share a `nonce`. Use {isRedeemed} to settle a
+     *      voucher off-chain rather than reading this directly.
      */
-    mapping(uint256 => bool) public usedNonces;
+    mapping(bytes32 => bool) public usedDigests;
 
     /**
      * @notice Addresses whose signatures authorize a redeem
@@ -79,27 +93,43 @@ contract FeeVault is Ownable, Pausable, EIP712 {
     mapping(address => bool) public isSigner;
 
     /**
+     * @notice Signers that were revoked and can never be granted again
+     * @dev Makes revocation permanent. Without this, re-granting a leaked key
+     *      would resurrect every voucher it had signed — an attacker who had
+     *      pre-signed far-future vouchers could wait out the remediation.
+     */
+    mapping(address => bool) public revokedSigners;
+
+    /**
      * @notice Emitted when a voucher is redeemed and the refund is transferred
      * @param token ERC20 the refund was paid in
      * @param to Recipient that received the refund
+     * @param nonce The voucher nonce (indexed for log filtering)
      * @param amount Amount transferred, in token base units
-     * @param nonce The voucher nonce, now consumed
+     * @param digest EIP-712 digest — the canonical settlement key
      * @param caller Address that submitted the redeem (may relay for `to`)
      */
     event FeeClaimed(
         address indexed token,
         address indexed to,
+        uint256 indexed nonce,
         uint256 amount,
-        uint256 nonce,
+        bytes32 digest,
         address caller
     );
 
     /**
      * @notice Emitted when a signer is granted or revoked
      * @param signer The signer address
-     * @param allowed True when granted, false when revoked
+     * @param allowed True when granted, false when revoked (permanently)
      */
     event SignerUpdated(address indexed signer, bool allowed);
+
+    /**
+     * @notice Emitted when the owner burns a single voucher digest
+     * @param digest The EIP-712 digest that can no longer be redeemed
+     */
+    event VoucherCancelled(bytes32 indexed digest);
 
     /**
      * @notice Emitted when the owner sweeps collected fees out of the vault
@@ -112,10 +142,45 @@ contract FeeVault is Ownable, Pausable, EIP712 {
     /**
      * @notice Deploys the vault with the deployer as owner and no signers
      * @dev The domain name/version are part of every voucher digest and must
-     *      match the backend signer exactly. Grant a signer via {setSigner}
-     *      before any voucher can be redeemed.
+     *      match the backend signer exactly. Grant a signer via {setSigner} and
+     *      hand ownership to a multisig ({transferOwnership} + `acceptOwnership`)
+     *      before routing real fees here.
      */
-    constructor() Ownable() EIP712("CancoreFeeVault", "1") {}
+    constructor() EIP712("CancoreFeeVault", "1") {}
+
+    /**
+     * @notice Computes the EIP-712 digest a voucher must be signed over
+     * @param voucher The fee-refund authorization
+     * @return The digest bound to this chain and this vault
+     * @dev Exposed so off-chain code settles against the contract's own hashing
+     *      instead of re-implementing EIP-712 and drifting from it.
+     */
+    function hashVoucher(FeeClaim calldata voucher) public view returns (bytes32) {
+        return
+            _hashTypedDataV4(
+                keccak256(
+                    abi.encode(
+                        FEE_CLAIM_TYPEHASH,
+                        voucher.token,
+                        voucher.to,
+                        voucher.amount,
+                        voucher.nonce,
+                        voucher.deadline
+                    )
+                )
+            );
+    }
+
+    /**
+     * @notice Whether a voucher has already been consumed (redeemed or cancelled)
+     * @param voucher The fee-refund authorization
+     * @return True when the voucher can no longer be redeemed
+     * @dev The settlement read for the backend watcher — one call, no local
+     *      EIP-712 reconstruction.
+     */
+    function isRedeemed(FeeClaim calldata voucher) external view returns (bool) {
+        return usedDigests[hashVoucher(voucher)];
+    }
 
     /**
      * @notice Redeems a backend-signed voucher, transferring the refund to `voucher.to`
@@ -123,60 +188,72 @@ contract FeeVault is Ownable, Pausable, EIP712 {
      * @param signature EIP-712 signature over `voucher` by a currently-granted signer
      * @dev Callable by anyone — the funds go to `voucher.to`, which is covered by
      *      the signature, so relaying cannot redirect them.
-     * @dev Uses Checks-Effects-Interactions: the nonce is consumed before the
+     * @dev Uses Checks-Effects-Interactions: the digest is consumed before the
      *      token transfer, so a reentrant call re-using the voucher reverts with
-     *      {NonceAlreadyUsed}.
+     *      {VoucherAlreadyUsed}.
      * @custom:security Rejects the voucher if the recovered signer is not (or is
-     *      no longer) granted, which retroactively kills a leaked key's vouchers.
+     *      no longer) granted, which retroactively kills a revoked key's vouchers.
      */
     function redeem(FeeClaim calldata voucher, bytes calldata signature) external whenNotPaused {
         if (voucher.token == address(0)) revert ZeroAddress();
         if (voucher.to == address(0)) revert ZeroAddress();
         if (voucher.amount == 0) revert ZeroAmount();
         if (block.timestamp > voucher.deadline) revert VoucherExpired();
-        if (usedNonces[voucher.nonce]) revert NonceAlreadyUsed();
 
-        bytes32 digest = _hashTypedDataV4(
-            keccak256(
-                abi.encode(
-                    FEE_CLAIM_TYPEHASH,
-                    voucher.token,
-                    voucher.to,
-                    voucher.amount,
-                    voucher.nonce,
-                    voucher.deadline
-                )
-            )
-        );
+        bytes32 digest = hashVoucher(voucher);
+        if (usedDigests[digest]) revert VoucherAlreadyUsed();
+
         // Reverts on a malformed signature; also rejects malleable high-s values.
         address signer = ECDSA.recover(digest, signature);
         if (!isSigner[signer]) revert InvalidSigner();
 
-        usedNonces[voucher.nonce] = true;
+        usedDigests[digest] = true;
 
         IERC20(voucher.token).safeTransfer(voucher.to, voucher.amount);
 
-        emit FeeClaimed(voucher.token, voucher.to, voucher.amount, voucher.nonce, msg.sender);
+        emit FeeClaimed(voucher.token, voucher.to, voucher.nonce, voucher.amount, digest, msg.sender);
     }
 
     /**
-     * @notice Grants or revokes a voucher signer (admin only)
+     * @notice Grants a voucher signer, or revokes one permanently (admin only)
      * @param signer The signer address to update
-     * @param allowed True to grant, false to revoke
+     * @param allowed True to grant, false to revoke forever
      * @dev Only owner can call this function
-     * @dev Revoking invalidates every voucher that signer produced, redeemed or not
+     * @dev Revoking invalidates every voucher that signer produced, redeemed or
+     *      not, and is irreversible — the address can never be granted again.
+     *      Rotate by granting the NEW key first, then revoking the old one.
      */
     function setSigner(address signer, bool allowed) external onlyOwner {
         if (signer == address(0)) revert ZeroAddress();
 
+        if (allowed) {
+            if (revokedSigners[signer]) revert SignerPermanentlyRevoked();
+        } else {
+            revokedSigners[signer] = true;
+        }
         isSigner[signer] = allowed;
 
         emit SignerUpdated(signer, allowed);
     }
 
     /**
+     * @notice Burns a single voucher digest so it can never be redeemed (admin only)
+     * @param digest EIP-712 digest of the voucher to kill — see {hashVoucher}
+     * @dev Only owner can call this function. Scalpel for one mis-signed or
+     *      leaked voucher, instead of {pause} (stops everyone) or {setSigner}
+     *      revocation (kills every voucher of that key).
+     */
+    function cancelVoucher(bytes32 digest) external onlyOwner {
+        usedDigests[digest] = true;
+
+        emit VoucherCancelled(digest);
+    }
+
+    /**
      * @notice Halts all redemptions (admin only)
      * @dev Only owner can call this function. Use on a suspected signer compromise.
+     * @dev Vouchers keep expiring while paused; the backend must re-issue any
+     *      that pass their deadline during the halt.
      */
     function pause() external onlyOwner {
         _pause();
@@ -209,5 +286,15 @@ contract FeeVault is Ownable, Pausable, EIP712 {
         IERC20(token).safeTransfer(to, amount);
 
         emit Swept(token, to, amount);
+    }
+
+    /**
+     * @notice Disabled — ownership can never be renounced
+     * @dev Every response lever is owner-only and the vault keeps receiving fees
+     *      from the HTLC, so an ownerless vault would be a permanent freeze with
+     *      no kill-switch. Use {transferOwnership} (2-step) instead.
+     */
+    function renounceOwnership() public view override onlyOwner {
+        revert RenounceDisabled();
     }
 }
