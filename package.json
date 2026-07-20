@@ -12,7 +12,8 @@
     "deploy:sepolia": "hardhat run scripts/deploy/deployHTLC.ts --network sepolia",
     "deploy:tokens": "hardhat run scripts/deploy/deployTokens.ts",
     "abi:extract": "node scripts/abi/extract-abi.mjs",
-    "abi:check": "node scripts/abi/check-abi-drift.mjs"
+    "abi:check": "node scripts/abi/check-abi-drift.mjs",
+    "deposit:usdcx:canton": "hardhat run scripts/deploy/depositUSDCxCanton.ts --network ethereum"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
