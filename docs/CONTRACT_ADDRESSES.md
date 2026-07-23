@@ -73,6 +73,22 @@ Contract: `contracts/utils/MultiBalanceChecker.sol`
 
 ---
 
+## FeeVault
+
+Contract: `contracts/FeeVault.sol`  
+
+Partner fee-refund voucher vault (`Ownable2Step`, `Pausable`, EIP-712). Owner-only: `setSigner` / `pause` / `cancelVoucher` / `sweep`. Wire it up by setting it as the HTLC `feeRecipient` (`npx hardhat setFeeRecipient`), then granting the backend voucher signer (`npx hardhat setFeeVaultSigner`).
+
+### Devnet
+
+| Network          | Chain ID | FeeVault address | Verified | Notes / deployment |
+|------------------|----------|------------------|----------|--------------------|
+| Sepolia          | 11155111 | [`0xD5a7561bA04E53C86bec03503EccA25dcDeF6Ec4`](https://sepolia.etherscan.io/address/0xD5a7561bA04E53C86bec03503EccA25dcDeF6Ec4) |          | Owner: deployer `0xDED3d9C3Aa8c88a06ac13125ad2c0570354C798F` (2-step; hand to multisig before mainnet) |
+| BNB Testnet      | 97       | [`0xF833A980ae858fe3cD14a79a9f610525AbB95BF9`](https://testnet.bscscan.com/address/0xF833A980ae858fe3cD14a79a9f610525AbB95BF9) |          | Owner: deployer `0xDED3d9C3Aa8c88a06ac13125ad2c0570354C798F` |
+| Arbitrum Sepolia | 421614   | [`0xFC8ad2761Aa2aa072D608c676A6517296BeDd30d`](https://sepolia.arbiscan.io/address/0xFC8ad2761Aa2aa072D608c676A6517296BeDd30d) |          | Owner: deployer `0xDED3d9C3Aa8c88a06ac13125ad2c0570354C798F` |
+
+---
+
 ## Reference: Permit2 (Uniswap)
 
 | Network  | Chain ID | Permit2 (reference)                          |
