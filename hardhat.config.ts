@@ -10,6 +10,8 @@ import { setPermit2Task } from "./scripts/tasks/setPermit2";
 import { deployMultiBalanceCheckerTask } from "./scripts/tasks/deployMultiBalanceChecker";
 import { deployFeeVaultTask } from "./scripts/tasks/deployFeeVault";
 import { setFeeVaultSignerTask } from "./scripts/tasks/setFeeVaultSigner";
+import { transferFeeVaultOwnershipTask } from "./scripts/tasks/transferFeeVaultOwnership";
+import { acceptFeeVaultOwnershipTask } from "./scripts/tasks/acceptFeeVaultOwnership";
 
 // Separate keys per tier so a mainnet owner key is never loaded into routine
 // testnet workflows. MAINNET_PRIVATE_KEY / TESTNET_PRIVATE_KEY take precedence;
@@ -51,6 +53,15 @@ task("setFeeVaultSigner", "Grants (or revokes with --revoke) a FeeVault voucher 
   .addParam("signer", "Backend voucher signer address")
   .addFlag("revoke", "Revoke instead of grant — kills every voucher this signer produced")
   .setAction(setFeeVaultSignerTask);
+
+task("transferFeeVaultOwnership", "Nominates a new FeeVault owner (Ownable2Step; nominee must then call acceptOwnership)")
+  .addParam("vault", "FeeVault contract address")
+  .addParam("owner", "New owner to nominate (must then call acceptOwnership to take control)")
+  .setAction(transferFeeVaultOwnershipTask);
+
+task("acceptFeeVaultOwnership", "Accepts a pending FeeVault ownership transfer (Ownable2Step; run as the nominated pendingOwner)")
+  .addParam("vault", "FeeVault contract address")
+  .setAction(acceptFeeVaultOwnershipTask);
 
 const config: HardhatUserConfig = {
   solidity: {

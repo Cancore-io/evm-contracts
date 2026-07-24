@@ -79,6 +79,16 @@ Contract: `contracts/FeeVault.sol`
 
 Partner fee-refund voucher vault (`Ownable2Step`, `Pausable`, EIP-712). Owner-only: `setSigner` / `pause` / `cancelVoucher` / `sweep`. Wire it up by setting it as the HTLC `feeRecipient` (`npx hardhat setFeeRecipient`), then granting the backend voucher signer (`npx hardhat setFeeVaultSigner`).
 
+### Mainnet
+
+Deployed 2026-07-24. Ownership is 2-step: intended owner (`pendingOwner`) = `0x15bA460148eBc7c5E979f6877a442Ec2860a4fb8`; until it calls `acceptOwnership()`, the deployer `0x6A8FAA37e4c7d8211032b4a76cD10DC3E2E26DD6` remains owner.
+
+| Network  | Chain ID | FeeVault address | Verified | Notes / deployment |
+|----------|----------|------------------|----------|--------------------|
+| Ethereum | 1        | [`0x122f2486EdC660858918E1b5408c47eB4784b6cb`](https://etherscan.io/address/0x122f2486EdC660858918E1b5408c47eB4784b6cb) |          | Deploy block: `25602415`. Pending owner `0x15bA46…4fb8` |
+| BNB      | 56       | [`0x73e9b976CBDac8a6BFE1aa606603732243b32800`](https://bscscan.com/address/0x73e9b976CBDac8a6BFE1aa606603732243b32800) |          | Deploy block: `111854438`. Pending owner `0x15bA46…4fb8` |
+| Arbitrum | 42161    | [`0x12268f8FA9B50cD0ae56556c1B60A5F1FD0dd3CF`](https://arbiscan.io/address/0x12268f8FA9B50cD0ae56556c1B60A5F1FD0dd3CF) |          | Pending owner `0x15bA46…4fb8` |
+
 ### Devnet
 
 | Network          | Chain ID | FeeVault address | Verified | Notes / deployment |
