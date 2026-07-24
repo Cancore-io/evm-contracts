@@ -1,5 +1,8 @@
 {
   "name": "hardhat-project",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
