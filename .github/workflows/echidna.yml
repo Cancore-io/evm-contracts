@@ -26,7 +26,7 @@ on:
 jobs:
   echidna:
     name: HTLC property fuzzing
-    runs-on: ubuntu-latest
+    runs-on: cancore-runners
     timeout-minutes: 60
 
     steps:

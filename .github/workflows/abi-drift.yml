@@ -14,7 +14,7 @@ on:
 jobs:
   abi-drift:
     name: ABI snapshot drift
-    runs-on: ubuntu-latest
+    runs-on: cancore-runners
     steps:
       - uses: actions/checkout@v4
 
