@@ -70,8 +70,27 @@ const config: HardhatUserConfig = {
       optimizer: {
         enabled: true,
         runs: 200
-      }
+      },
+      metadata: {
+        bytecodeHash: "none"
+      },
+      ...(process.env.ENABLE_SMT === "true" ? {
+        modelChecker: {
+          engine: "chc",
+          targets: ["overflow", "underflow", "assert", "outOfBounds"],
+          contracts: {
+            "contracts/HTLC.sol": ["HTLC"],
+            "contracts/FeeVault.sol": ["FeeVault"]
+          }
+        }
+      } : {})
     }
+  },
+  gasReporter: {
+    enabled: process.env.REPORT_GAS !== "false",
+    currency: "USD",
+    outputFile: "reports/gas-report.txt",
+    noColors: true,
   },
   paths: {
     sources: "./contracts",

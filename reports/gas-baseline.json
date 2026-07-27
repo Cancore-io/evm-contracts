@@ -1,0 +1,23 @@
+{
+  "FeeVault.acceptOwnership": 28268,
+  "FeeVault.cancelVoucher": 47363,
+  "FeeVault.pause": 46858,
+  "FeeVault.redeem": 93747,
+  "FeeVault.setSigner": 49504,
+  "FeeVault.sweep": 60473,
+  "FeeVault.transferOwnership": 47857,
+  "FeeVault.unpause": 24952,
+  "HTLC.claim": 75466,
+  "HTLC.lock": 178198,
+  "HTLC.lockWithPermit": 194349,
+  "HTLC.lockWithPermit2": 184253,
+  "HTLC.retake": 53880,
+  "HTLC.setFeeRate": 42607,
+  "HTLC.setFeeRecipient": 28483,
+  "HTLC.setPermit2": 36263,
+  "TestToken.approve": 33125,
+  "TestToken.mint": 42615,
+  "TestToken.transfer": 46682,
+  "TestTokenWithPermit.mint": 67793,
+  "TestTokenWithPermit.permit": 74632
+}
