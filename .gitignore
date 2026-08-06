@@ -11,6 +11,9 @@ cache
 artifacts
 typechain-types
 
+# TronBox build output
+tron/build
+
 # Coverage
 coverage
 coverage.json
