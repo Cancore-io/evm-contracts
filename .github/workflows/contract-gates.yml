@@ -53,6 +53,12 @@ jobs:
         id: bytecode
         run: npm run bytecode:check
 
+      # CAN-599: the TVM build compiles pragma-only copies of the canonical
+      # sources (tron-solc tops out at 0.8.26). Pure file diff — no compiler.
+      - name: Tron port drift gate
+        id: tron-drift
+        run: npm run tron:drift
+
       - name: Summary
         if: ${{ !cancelled() }}
         run: |
@@ -64,6 +70,7 @@ jobs:
             echo "|---|---|"
             echo "| Gas regression (±3%) | $(icon '${{ steps.gas.outcome }}') ${{ steps.gas.outcome }} |"
             echo "| Bytecode match | $(icon '${{ steps.bytecode.outcome }}') ${{ steps.bytecode.outcome }} |"
+            echo "| Tron port drift | $(icon '${{ steps.tron-drift.outcome }}') ${{ steps.tron-drift.outcome }} |"
             echo ""
             echo "Baselines: \`reports/gas-baseline.json\`, \`abi/bytecode-hashes.json\`."
             echo "Intentional change? Regenerate with \`npm run gas:generate\` / \`npm run bytecode:generate\` and commit the diff."

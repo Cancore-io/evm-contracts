@@ -21,12 +21,17 @@
     "deploy:tokens": "hardhat run scripts/deploy/deployTokens.ts",
     "abi:extract": "node scripts/abi/extract-abi.mjs",
     "abi:check": "node scripts/abi/check-abi-drift.mjs",
+    "tron:drift": "node scripts/tools/check-tron-drift.mjs",
+    "tron:compile": "cd tron && ln -sfn ../node_modules node_modules && tronbox compile",
+    "tron:deploy:shasta": "npm run tron:compile && cd tron && tronbox migrate --network shasta",
+    "tron:deploy:nile": "npm run tron:compile && cd tron && tronbox migrate --network nile",
     "deposit:usdcx:canton": "hardhat run scripts/deploy/depositUSDCxCanton.ts --network ethereum"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
     "hardhat": "^2.28.4",
-    "hardhat-slither": "^1.0.4"
+    "hardhat-slither": "^1.0.4",
+    "tronbox": "^4.9.0"
   },
   "dependencies": {
     "@nomicfoundation/hardhat-verify": "^2.1.3",

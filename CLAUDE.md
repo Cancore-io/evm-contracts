@@ -44,6 +44,27 @@ npm run security               # slither + тесты
 | BNB Testnet | 0x36D7BEBDB5f93b7b926D621E412132dF89628810 | 0x079bDc94B34EC0e905DcfDB516bdE2f292Efcef2 |
 | Arbitrum Sepolia | 0x07a6ccF1f0113e2329Bb2460b28eC0d169f5080E | 0x555Bef5d2f89Fc81c77b930AB6c0D6734bDE569e |
 
+## Tron (TVM) — CAN-599 Ф3b
+
+TVM исполняет Solidity, но tron-solc ограничен **0.8.26** (канонический pragma — 0.8.33),
+поэтому Tron-сборка компилирует **копии** в `tron/contracts/` (HTLC + интерфейсы), где
+единственное допустимое отличие — строка pragma. Дрейф ловит гейт `npm run tron:drift`
+(CI: Contract Gates). `block.timestamp` в TVM — **секунды**, как в EVM (java-tron делит
+заголовок на 1000) — семантика unlockTime не меняется. Permit2 на Tron не задеплоен,
+у USDT-TRC20 нет EIP-2612 — `lockWithPermit2`/`lockWithPermit` в порте инертны
+(гард `Permit2NotSet` / фолбэк на allowance), но сохранены ради pragma-only диффа.
+
+```bash
+npm run tron:compile          # tronbox compile (tron-solc 0.8.26)
+npm run tron:drift            # гейт: tron/contracts == contracts модуло pragma
+npm run tron:deploy:shasta    # деплой на Shasta (нужен TRON_PRIVATE_KEY + TRX с фосета)
+npm run tron:deploy:nile      # деплой на Nile
+```
+
+Деплойный ключ: Tron использует secp256k1 — обычный EVM-ключ работает как
+`TRON_PRIVATE_KEY` (фолбэк: `TESTNET_PRIVATE_KEY`/`PRIVATE_KEY`), но T-адрес другой
+(keccak + префикс 0x41) и его надо один раз пополнить через фосет Shasta/Nile.
+
 ## Hardhat tasks
 
 ```bash
