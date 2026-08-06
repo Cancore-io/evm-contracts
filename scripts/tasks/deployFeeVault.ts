@@ -2,7 +2,7 @@ import { HardhatRuntimeEnvironment } from "hardhat/types";
 import { TaskArguments } from "hardhat/types";
 
 /** Chains where leaving the vault under the deploying EOA is not acceptable. */
-const MAINNET_CHAIN_IDS = new Set<bigint>([1n, 56n, 42161n]);
+const MAINNET_CHAIN_IDS = new Set<bigint>([1n, 56n, 42161n, 4663n]);
 
 /**
  * Deploys FeeVault — the partner fee-refund vault.

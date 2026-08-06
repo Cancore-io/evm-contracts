@@ -116,6 +116,17 @@ const config: HardhatUserConfig = {
       chainId: 42161,
       accounts: mainnetAccounts
     },
+    // Robinhood Chain — Arbitrum Orbit / Nitro L2, native ETH, Blockscout explorer.
+    robinhood: {
+      url: process.env.ROBINHOOD_RPC_URL || "https://rpc.mainnet.chain.robinhood.com",
+      chainId: 4663,
+      accounts: mainnetAccounts
+    },
+    robinhoodTestnet: {
+      url: process.env.ROBINHOOD_TESTNET_RPC_URL || "https://rpc.testnet.chain.robinhood.com",
+      chainId: 46630,
+      accounts: testnetAccounts
+    },
     sepolia: {
       url: process.env.SEPOLIA_RPC_URL || "https://rpc.sepolia.org",
       chainId: 11155111,
@@ -133,7 +144,27 @@ const config: HardhatUserConfig = {
     }
   },
   etherscan: {
-    apiKey: process.env.ETHERSCAN_API_KEY || ""
+    apiKey: process.env.ETHERSCAN_API_KEY || "",
+    // Robinhood uses Blockscout (no API key required). Verify with e.g.
+    // `npx hardhat verify --network robinhood <address>`.
+    customChains: [
+      {
+        network: "robinhood",
+        chainId: 4663,
+        urls: {
+          apiURL: "https://robinhoodchain.blockscout.com/api",
+          browserURL: "https://robinhoodchain.blockscout.com"
+        }
+      },
+      {
+        network: "robinhoodTestnet",
+        chainId: 46630,
+        urls: {
+          apiURL: "https://explorer.testnet.chain.robinhood.com/api",
+          browserURL: "https://explorer.testnet.chain.robinhood.com"
+        }
+      }
+    ]
   },
   sourcify: {
     enabled: true
