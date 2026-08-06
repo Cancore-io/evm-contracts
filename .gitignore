@@ -11,6 +11,10 @@ cache
 artifacts
 typechain-types
 
+# Tron/TVM isolated build (hardhat.tron.config.ts)
+cache-tron
+artifacts-tron
+
 # Coverage
 coverage
 coverage.json

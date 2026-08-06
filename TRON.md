@@ -13,25 +13,39 @@ CAN-633. Tron runs the EVM `HTLC.sol` **unchanged** — no port, no re-audit.
 
 ## Build
 
-TVM does not implement the Shanghai `PUSH0` opcode, so compile with `evmVersion: "paris"`
-(set `solidity.settings.evmVersion` in `hardhat.config.ts` for the Tron artifact, or use a
-dedicated compile). The rest of the toolchain is unchanged.
+TVM lacks the Shanghai+ opcodes solc emits by default (`PUSH0`, `MCOPY`, transient storage),
+so the Tron build pins `evmVersion: "paris"`. This lives in a **separate**
+`hardhat.tron.config.ts` writing to `artifacts-tron/` — the default EVM build and its
+`bytecode:check` / `gas:check` references stay untouched.
+
+```bash
+npm run compile:tron   # hardhat compile --config hardhat.tron.config.ts -> artifacts-tron/
+```
 
 ## Deploy
 
-Prereqs (operator-provided — the deploy cannot run without them):
+Deploy is via **TronWeb** (`scripts/deploy/deployHTLCTron.ts`), not ethers — Tron
+transactions use a protobuf format, not Ethereum RLP, so Hardhat/ethers cannot broadcast
+them. The `nile` network in the Tron config exposes the EVM-compat JSON-RPC
+(`https://nile.trongrid.io/jsonrpc`, chainId `3448148188`) for reads / the indexer only.
 
-- A funded **Nile testnet** account key. The deployer becomes the HTLC `owner` and initial
-  `feeRecipient` (same as on EVM) — use the intended ops key, not a throwaway.
-- A TronGrid / Nile `fullHost` (e.g. `https://nile.trongrid.io`).
+Env (`.env`):
 
-Deploy the paris-compiled `HTLC` bytecode with TronBox or a `tronweb` script
-(`tronWeb.contract().new({ abi, bytecode, feeLimit })`). No constructor args.
+| Var | Purpose | Default |
+|-----|---------|---------|
+| `TRON_PRIVATE_KEY` | Deployer key — **becomes HTLC `owner` + `feeRecipient`**, use the ops key | (required) |
+| `TRON_FULL_HOST` | TronWeb node (full HTTP API, not `/jsonrpc`) | `https://nile.trongrid.io` |
+| `TRON_FEE_LIMIT_SUN` | Max energy burn for the deploy tx | `5000000000` (5000 TRX) |
+| `TRON_JSONRPC_URL` | EVM-compat read endpoint for the `nile` hardhat network | `https://nile.trongrid.io/jsonrpc` |
 
-> TronBox ships its own solc fork; if it lacks 0.8.33, deploy the Hardhat-compiled (paris)
-> artifact via `tronweb` instead — the bytecode stays TVM-compatible.
+```bash
+npm run deploy:tron:nile   # compiles (paris) + deploys HTLC via TronWeb, prints base58 + hex
+```
 
-Post-deploy, wire the Nile HTLC address into:
+The deployer needs Nile TRX + energy (faucet: <https://nileex.io/join/getJoinPage>).
+`HTLC()` takes no constructor args.
+
+Post-deploy, wire the printed HTLC address into:
 
 - frontend `src/config/contracts.ts` (Phase 4),
 - backend network config (Phase 2 leg) + indexer (Phase 3).
