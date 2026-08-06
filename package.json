@@ -18,6 +18,8 @@
     "security": "npm run slither && npm run bytecode:check && npm test",
     "deploy:local": "hardhat run scripts/deploy/deployHTLC.ts",
     "deploy:sepolia": "hardhat run scripts/deploy/deployHTLC.ts --network sepolia",
+    "compile:tron": "hardhat compile --config hardhat.tron.config.ts",
+    "deploy:tron:nile": "hardhat run scripts/deploy/deployHTLCTron.ts --config hardhat.tron.config.ts",
     "deploy:tokens": "hardhat run scripts/deploy/deployTokens.ts",
     "abi:extract": "node scripts/abi/extract-abi.mjs",
     "abi:check": "node scripts/abi/check-abi-drift.mjs",
@@ -26,7 +28,8 @@
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
     "hardhat": "^2.28.4",
-    "hardhat-slither": "^1.0.4"
+    "hardhat-slither": "^1.0.4",
+    "tronweb": "^6.4.0"
   },
   "dependencies": {
     "@nomicfoundation/hardhat-verify": "^2.1.3",
