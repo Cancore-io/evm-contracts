@@ -1,15 +1,24 @@
-# Deploying HTLC to Tron (TVM)
+# Deploying the contracts to Tron (TVM)
 
-CAN-633. Tron runs the EVM `HTLC.sol` **unchanged** — no port, no re-audit.
+CAN-633. Tron runs the EVM contracts **unchanged** — no port, no re-audit. `HTLC`,
+`MultiBalanceChecker` and `FeeVault` are all TVM-compatible as-is.
 
-## Why reuse HTLC.sol as-is
+## Why they reuse as-is
 
-- `lock` / `claim` / `retake` are plain Solidity. `claim` hashes with `sha256(preImage)`
-  and timelocks on `block.timestamp` (unix) — byte-identical to the EVM and Canton legs,
-  so the same pre-image / hashLock settles all three. Atomicity is preserved.
-- `lockWithPermit2` (Uniswap Permit2) and `lockWithPermit` (EIP-2612) are **dead on Tron**
-  — there is no canonical Permit2 contract and TRC-20 has no EIP-2612 — but harmless: each
-  reverts if called, and the Tron backend uses the plain `lock()` path only.
+- **HTLC** — `lock` / `claim` / `retake` are plain Solidity. `claim` hashes with
+  `sha256(preImage)` and timelocks on `block.timestamp` (unix), byte-identical to the EVM
+  and Canton legs, so the same pre-image / hashLock settles all three. `lockWithPermit2`
+  (Permit2) and `lockWithPermit` (EIP-2612) are dead-but-harmless on Tron (no canonical
+  Permit2, TRC-20 has no EIP-2612); the backend uses the plain `lock()` path only.
+- **MultiBalanceChecker** — a `view` batch reader (`IERC20.balanceOf` / native `.balance`
+  = TRX). No state, no owner, no constructor.
+- **FeeVault** — `ECDSA.recover` uses the `ecrecover` precompile (Tron supports it);
+  `Ownable2Step` / `Pausable` / `SafeERC20` are standard. Zero-arg constructor, deployer =
+  owner. On Nile (`--owner` gate is mainnet-only) leaving the deployer as owner is fine.
+  > ⚠ **EIP-712 chainId.** The domain separator is built from `block.chainid`. The backend
+  > must sign `FeeClaim` vouchers with the Tron chainId (**Nile `3448148188`**) and the
+  > deployed vault address — otherwise `redeem` reverts `InvalidSigner`. If a correct signer
+  > still fails, Tron's `block.chainid` is the first suspect.
 
 ## Build
 
@@ -24,30 +33,41 @@ npm run compile:tron   # hardhat compile --config hardhat.tron.config.ts -> arti
 
 ## Deploy
 
-Deploy is via **TronWeb** (`scripts/deploy/deployHTLCTron.ts`), not ethers — Tron
-transactions use a protobuf format, not Ethereum RLP, so Hardhat/ethers cannot broadcast
-them. The `nile` network in the Tron config exposes the EVM-compat JSON-RPC
-(`https://nile.trongrid.io/jsonrpc`, chainId `3448148188`) for reads / the indexer only.
+One generic TronWeb deployer (`scripts/deploy/deployTron.ts`, `TRON_CONTRACT=<name>`) — not
+ethers, since Tron txns use a protobuf format Hardhat cannot broadcast. The `nile` network
+in the Tron config exposes the EVM-compat JSON-RPC (`https://nile.trongrid.io/jsonrpc`,
+chainId `3448148188`) for reads / the indexer only. All three constructors take no args.
 
 Env (`.env`):
 
 | Var | Purpose | Default |
 |-----|---------|---------|
-| `TRON_PRIVATE_KEY` | Deployer key — **becomes HTLC `owner` + `feeRecipient`**, use the ops key | (required) |
+| `TRON_PRIVATE_KEY` | Deployer key — **becomes `owner` (HTLC, FeeVault)**, use the ops key | (required) |
 | `TRON_FULL_HOST` | TronWeb node (full HTTP API, not `/jsonrpc`) | `https://nile.trongrid.io` |
 | `TRON_FEE_LIMIT_SUN` | Max energy burn for the deploy tx | `5000000000` (5000 TRX) |
 | `TRON_JSONRPC_URL` | EVM-compat read endpoint for the `nile` hardhat network | `https://nile.trongrid.io/jsonrpc` |
 
 ```bash
-npm run deploy:tron:nile   # compiles (paris) + deploys HTLC via TronWeb, prints base58 + hex
+npm run deploy:tron:htlc       # HTLC
+npm run deploy:tron:mbc        # MultiBalanceChecker
+npm run deploy:tron:feevault   # FeeVault
 ```
 
-The deployer needs Nile TRX + energy (faucet: <https://nileex.io/join/getJoinPage>).
-`HTLC()` takes no constructor args.
+Each prints the deployed `base58` + `hex` address. The deployer needs Nile TRX + energy
+(faucet: <https://nileex.io/join/getJoinPage>).
 
-Post-deploy, wire the printed HTLC address into:
+## Deployed — Nile testnet
+
+| Contract | base58 | hex |
+|----------|--------|-----|
+| HTLC | `TSSUEMbs4debLa9KXyZEDAezjFdv1S8iRi` | `0xb4a9f4cd0be60114346c52ca794864762d01b569` |
+| MultiBalanceChecker | _(pending)_ | |
+| FeeVault | _(pending)_ | |
+
+Post-deploy, wire the HTLC (and MultiBalanceChecker) addresses into:
 
 - frontend `src/config/contracts.ts` (Phase 4),
 - backend network config (Phase 2 leg) + indexer (Phase 3).
 
-Then mirror the EVM fee setup if fees are enabled: `setFeeRecipient` → FeeVault, `setFeeRate`.
+FeeVault is only needed once fees are enabled: `setFeeRecipient` → FeeVault, `setFeeRate`,
+`setFeeVaultSigner`, then hand ownership to a multisig.
