@@ -61,8 +61,11 @@ Each prints the deployed `base58` + `hex` address. The deployer needs Nile TRX +
 | Contract | base58 | hex |
 |----------|--------|-----|
 | HTLC | `TSSUEMbs4debLa9KXyZEDAezjFdv1S8iRi` | `0xb4a9f4cd0be60114346c52ca794864762d01b569` |
-| MultiBalanceChecker | _(pending)_ | |
-| FeeVault | _(pending)_ | |
+| MultiBalanceChecker | `TYbSumvgenG5E17hMF2nUpjof1pNm1X2Gt` | `0xf82d5a39342fd3a5a91388cd95f5f102d162a24d` |
+| FeeVault | `TKRwqH5wAucAFooAWtH7Qw2g38HjR4TWsE` | `0x67c7b36d139b84ef4d826ea53cc08e722ce8fef5` |
+
+Deployer / owner (HTLC + FeeVault): `TDsnUF1kEnhywLpcBMNG75b4jpgmJdGNpb`. Transfer FeeVault
+ownership to a multisig before enabling fees on mainnet.
 
 Post-deploy, wire the HTLC (and MultiBalanceChecker) addresses into:
 
