@@ -43,6 +43,9 @@ npm run security               # slither + тесты
 | Sepolia | 0xc705C735278AEeF773acb6d1028D8A241D8a9556 | 0x99182E3F18555CFB08e6443e68a11982eF686522 |
 | BNB Testnet | 0x36D7BEBDB5f93b7b926D621E412132dF89628810 | 0x079bDc94B34EC0e905DcfDB516bdE2f292Efcef2 |
 | Arbitrum Sepolia | 0x07a6ccF1f0113e2329Bb2460b28eC0d169f5080E | 0x555Bef5d2f89Fc81c77b930AB6c0D6734bDE569e |
+| Tron Nile (base58) | TSSUEMbs4debLa9KXyZEDAezjFdv1S8iRi | TYbSumvgenG5E17hMF2nUpjof1pNm1X2Gt |
+
+Tron-адреса — base58 (`T…`). FeeVault на Nile: `TKRwqH5wAucAFooAWtH7Qw2g38HjR4TWsE`. Деплой и детали — `TRON.md`.
 
 ## Hardhat tasks
 
