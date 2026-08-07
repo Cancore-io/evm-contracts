@@ -1,19 +1,23 @@
-name: Echidna Invariants (nightly)
+name: Echidna Invariants
 
-# Non-blocking nightly property-based fuzzing of the HTLC invariant harness
-# (contracts/test/echidna/EchidnaHTLC.sol). Echidna is slow and stochastic, so
-# it runs on a schedule rather than per-push and never fails the pipeline — a
-# broken invariant surfaces as a failed run to triage, not a merge gate.
-#
-# NOTE: per-push / PR-gating wiring is deferred to the evm-toolchain ticket
-# (CAN-418). This workflow provides the runner via crytic/echidna-action.
+# BLOCKING property-based fuzzing of the HTLC invariant harness
+# (contracts/test/echidna/EchidnaHTLC.sol). Flipped from report-only after the
+# nightly runs stayed consistently green since 2026-07-10 (CAN-418, LeadQA
+# re-audit item 3): a falsified invariant now fails the pipeline — on a PR it
+# blocks the merge, on main it turns the branch red for triage. Paths-filtered
+# so doc/script-only changes skip the fuzz entirely.
 
 on:
   workflow_dispatch:
   schedule:
     - cron: '0 2 * * *'
-  # Fuzz on pushes that touch the contracts or the harness — Echidna is slow, so
-  # skip pushes that only change docs/scripts. Non-blocking (continue-on-error).
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - 'echidna.yaml'
+      - 'hardhat.config.ts'
+      - 'package.json'
+      - '.github/workflows/echidna.yml'
   push:
     branches: [main]
     paths:
@@ -48,7 +52,6 @@ jobs:
       - name: Run Echidna (property mode)
         id: echidna
         uses: crytic/echidna-action@v2
-        continue-on-error: true
         with:
           files: .
           contract: EchidnaHTLC
@@ -71,5 +74,5 @@ jobs:
             echo "## ${ICON} Echidna Invariants"
             echo ""
             echo "Harness: \`EchidnaHTLC\` — INV-1/INV-2/INV-3/INV-5 on the EVM leg (see docs/rtm/invariants.md)."
-            echo "Non-blocking — a failing property is a triage item, not a merge gate."
+            echo "BLOCKING gate (CAN-418): a falsified invariant fails the pipeline."
           } >> "$GITHUB_STEP_SUMMARY"
