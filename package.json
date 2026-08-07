@@ -22,6 +22,7 @@
     "deploy:tron:htlc": "TRON_CONTRACT=HTLC hardhat run scripts/deploy/deployTron.ts --config hardhat.tron.config.ts",
     "deploy:tron:mbc": "TRON_CONTRACT=MultiBalanceChecker hardhat run scripts/deploy/deployTron.ts --config hardhat.tron.config.ts",
     "deploy:tron:feevault": "TRON_CONTRACT=FeeVault hardhat run scripts/deploy/deployTron.ts --config hardhat.tron.config.ts",
+    "deploy:tron:tokens": "hardhat run scripts/deploy/deployTronTokens.ts --config hardhat.tron.config.ts",
     "deploy:tokens": "hardhat run scripts/deploy/deployTokens.ts",
     "abi:extract": "node scripts/abi/extract-abi.mjs",
     "abi:check": "node scripts/abi/check-abi-drift.mjs",
